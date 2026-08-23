@@ -2,7 +2,7 @@ import { pointAlong } from "../geo";
 import type { PreparedRoute, Train } from "../sim/fleet";
 import type { Station } from "../types";
 import { TRAIN_STATUS, type LiveTrain } from "./client";
-import { nameCandidates, normalizeName } from "./names";
+import { nameCandidates, normalizeName, stripOperationSuffix } from "./names";
 
 /** 역 출발 직후 열차를 역에서 떼어 놓는 최대 거리(m). */
 const DEPART_OFFSET = 200;
@@ -216,6 +216,7 @@ export function placeLiveTrains(
         line: route.line,
         color: route.color,
         cars: route.cars,
+        destination: stripOperationSuffix(anchor.live.destination),
         dir,
         along,
         dwell: 0,

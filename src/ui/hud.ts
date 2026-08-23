@@ -1,3 +1,4 @@
+import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
 import type { Network, SimState, Station } from "../types";
 
 export type HudHandlers = {
@@ -138,6 +139,89 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let lastClockSec = -1;
   let lastNight: string | null = null;
   let liveNote = "";
+  let arrivalsAbort: AbortController | null = null;
+
+  const colorOf = (lineId: string | null) =>
+    network.lines.find((l) => l.id === lineId)?.color ?? "#8a8a8a";
+
+  /** 방향(상행/하행/내선/외선)별로 묶어서 각 방향 앞쪽 2대만 보여준다. */
+  const renderArrivals = (host: HTMLElement, list: StationArrival[]) => {
+    if (list.length === 0) {
+      host.innerHTML = `<div class="arrivals-empty">지금은 도착 예정 열차가 없습니다.</div>`;
+      return;
+    }
+
+    const groups = new Map<string, StationArrival[]>();
+    for (const a of list) {
+      const key = `${a.line ?? "?"}|${a.updown}`;
+      const g = groups.get(key);
+      if (g) g.push(a);
+      else groups.set(key, [a]);
+    }
+
+    host.innerHTML = "";
+    for (const group of groups.values()) {
+      for (const a of group.slice(0, 2)) {
+        const row = document.createElement("div");
+        row.className = "arrival";
+
+        const dot = document.createElement("span");
+        dot.className = "arrival-dot";
+        dot.style.background = colorOf(a.line);
+
+        const body = document.createElement("div");
+        body.className = "arrival-body";
+
+        const head = document.createElement("div");
+        head.className = "arrival-head";
+        head.textContent = a.headsign;
+        if (a.kind !== "일반") {
+          const tag = document.createElement("em");
+          tag.textContent = a.kind;
+          head.appendChild(tag);
+        }
+        if (a.isLastTrain) {
+          const tag = document.createElement("em");
+          tag.className = "is-last";
+          tag.textContent = "막차";
+          head.appendChild(tag);
+        }
+
+        const eta = document.createElement("div");
+        eta.className = "arrival-eta";
+        eta.textContent = formatEta(a);
+
+        body.append(head, eta);
+        row.append(dot, body);
+        host.appendChild(row);
+      }
+    }
+  };
+
+  const loadArrivals = (station: Station) => {
+    const host = popup.querySelector("#arrivals") as HTMLElement | null;
+    if (!host) return;
+
+    arrivalsAbort?.abort();
+    arrivalsAbort = new AbortController();
+    const signal = arrivalsAbort.signal;
+
+    fetchStationArrivals(station.name, signal)
+      .then((list) => {
+        if (signal.aborted) return;
+        renderArrivals(host, list);
+      })
+      .catch((error) => {
+        if (signal.aborted) return;
+        host.innerHTML = "";
+        const msg = document.createElement("div");
+        msg.className = "arrivals-empty";
+        msg.textContent =
+          error instanceof ArrivalsError ? error.message : "도착정보를 불러오지 못했습니다.";
+        host.appendChild(msg);
+      });
+  };
+
   return {
     tick(now: Date, trainCount: number) {
       const sec = Math.floor(now.getTime() / 1000);
@@ -192,12 +276,19 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         .join("");
       popup.hidden = false;
       popup.innerHTML = `
-        <h2>${station.name}</h2>
-        <div class="en">${station.nameEn}</div>
+        <h2></h2>
+        <div class="en"></div>
         <div class="chips">${chips}</div>
+        <div class="arrivals" id="arrivals"><div class="arrivals-loading">도착정보 불러오는 중…</div></div>
       `;
+      // 역명은 외부 데이터라 textContent 로 넣는다.
+      popup.querySelector("h2")!.textContent = station.name;
+      popup.querySelector(".en")!.textContent = station.nameEn;
+      loadArrivals(station);
     },
     hideStation() {
+      arrivalsAbort?.abort();
+      arrivalsAbort = null;
       popup.hidden = true;
     },
   };

@@ -49,9 +49,14 @@ export default defineConfig(({ mode }) => {
         "/api/subway": {
           target: UPSTREAM,
           changeOrigin: true,
-          // 프로덕션의 api/subway/position.ts 와 같은 인터페이스를 dev 에서 흉내낸다.
+          // 프로덕션의 api/subway/*.ts 와 같은 인터페이스를 dev 에서 흉내낸다.
           rewrite: (path) => {
-            const line = new URL(path, "http://x").searchParams.get("line") ?? "";
+            const url = new URL(path, "http://x");
+            if (url.pathname.endsWith("/arrivals")) {
+              const station = url.searchParams.get("station") ?? "";
+              return `/api/subway/${key}/json/realtimeStationArrival/0/20/${encodeURIComponent(station)}`;
+            }
+            const line = url.searchParams.get("line") ?? "";
             return `/api/subway/${key}/json/realtimePosition/0/300/${encodeURIComponent(line)}`;
           },
         },

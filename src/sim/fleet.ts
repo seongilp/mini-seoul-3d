@@ -7,6 +7,8 @@ export type Train = {
   line: string;
   color: string;
   cars: number;
+  /** 행선지(종착역). 지도 라벨에 쓴다. */
+  destination: string;
   dir: 1 | -1;
   along: number;
   dwell: number;
@@ -52,6 +54,13 @@ export function prepareRoutes(network: Network): PreparedRoute[] {
     });
 }
 
+/** 진행 방향 끝의 역 이름. 순환선은 종착 개념이 없어 내선/외선으로 표기한다. */
+function terminalName(route: PreparedRoute, dir: 1 | -1): string {
+  if (route.loop) return dir === 1 ? "내선순환" : "외선순환";
+  const end = dir === 1 ? route.stations[route.stations.length - 1] : route.stations[0];
+  return end ? end.name : "";
+}
+
 export function seedTrains(routes: PreparedRoute[], state: SimState): Train[] {
   const trains: Train[] = [];
   const factor = hourFactor(state.clockMs);
@@ -72,6 +81,7 @@ export function seedTrains(routes: PreparedRoute[], state: SimState): Train[] {
           line: route.line,
           color: route.color,
           cars: route.cars,
+          destination: terminalName(route, dir),
           dir,
           along,
           dwell: 0,
@@ -148,6 +158,7 @@ export function stepFleet(
       const end = train.along >= route.length ? route.length : 0;
       train.along = end;
       train.dir = train.dir === 1 ? -1 : 1;
+      train.destination = terminalName(route, train.dir);
       train.dwell = DWELL * 0.7;
       const term = nearestStop(route, end);
       if (term) train.lastStop = term.along;

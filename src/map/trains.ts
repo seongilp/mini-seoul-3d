@@ -11,6 +11,15 @@ const ORIGIN: [number, number] = [126.9784, 37.5665];
 const BOX_LEN = 10;
 const MAX = 512;
 const LAYER_ID = "metro-trains-3d";
+const LABEL_SOURCE = "metro-train-labels";
+const LABEL_LAYER = "metro-train-label";
+/** 이 줌 아래에서는 라벨이 서로 겹쳐 읽기 어렵다. */
+const LABEL_MIN_ZOOM = 12.8;
+/**
+ * 라벨 갱신 주기(ms). setData 는 GeoJSON 을 워커로 넘겨 다시 파싱하므로
+ * 매 프레임 호출하면 열차 수백 대에서 프레임이 무너진다.
+ */
+const LABEL_INTERVAL_MS = 400;
 
 function trainScale(zoom: number): number {
   const metersPerPx = (156543.03392 * Math.cos((37.5665 * Math.PI) / 180)) / 2 ** zoom;
@@ -142,6 +151,53 @@ class TrainLayer implements CustomLayerInterface {
 
 let layer: TrainLayer | null = null;
 
+/** 열차 행선지를 GeoJSON 으로 만든다. 라벨이 보이는 줌에서만 호출한다. */
+function labelData(trains: Train[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: trains
+      .filter((t) => t.destination)
+      .map((t) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: t.coord },
+        properties: { label: `${t.destination}행`, color: t.color },
+      })),
+  };
+}
+
+function addLabelLayer(map: MapLibreMap): void {
+  if (map.getLayer(LABEL_LAYER)) map.removeLayer(LABEL_LAYER);
+  if (map.getSource(LABEL_SOURCE)) map.removeSource(LABEL_SOURCE);
+
+  map.addSource(LABEL_SOURCE, {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+
+  map.addLayer({
+    id: LABEL_LAYER,
+    type: "symbol",
+    source: LABEL_SOURCE,
+    minzoom: LABEL_MIN_ZOOM,
+    layout: {
+      "text-field": ["get", "label"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 13, 10, 16, 12.5],
+      // 열차 박스 위쪽에 띄운다.
+      "text-offset": [0, -1.5],
+      "text-anchor": "bottom",
+      // 겹치면 MapLibre 가 알아서 일부만 남긴다.
+      "text-optional": true,
+      "text-padding": 3,
+    },
+    paint: {
+      "text-color": ["get", "color"],
+      "text-halo-color": "#fbf7ee",
+      "text-halo-width": 1.6,
+    },
+  });
+}
+
 export function addTrainLayers(map: MapLibreMap, trains: Train[]): void {
   for (const id of [LAYER_ID, "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
     if (map.getLayer(id)) map.removeLayer(id);
@@ -153,10 +209,34 @@ export function addTrainLayers(map: MapLibreMap, trains: Train[]): void {
   layer = new TrainLayer();
   layer.setTrains(trains);
   map.addLayer(layer);
+  addLabelLayer(map);
 }
+
+let lastLabelAt = 0;
+let labelsCleared = true;
 
 export function updateTrains(map: MapLibreMap, trains: Train[]): void {
   if (!layer || !map.getLayer(LAYER_ID)) return;
   layer.setTrains(trains);
+  syncLabels(map, trains);
   map.triggerRepaint();
+}
+
+function syncLabels(map: MapLibreMap, trains: Train[]): void {
+  const source = map.getSource(LABEL_SOURCE) as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+
+  if (map.getZoom() < LABEL_MIN_ZOOM) {
+    if (!labelsCleared) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      labelsCleared = true;
+    }
+    return;
+  }
+
+  const now = performance.now();
+  if (now - lastLabelAt < LABEL_INTERVAL_MS) return;
+  lastLabelAt = now;
+  labelsCleared = false;
+  source.setData(labelData(trains));
 }
