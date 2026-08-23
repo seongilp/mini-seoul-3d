@@ -1,5 +1,5 @@
 import { cumulative, pointAlong } from "../geo";
-import type { LineInfo, Network, Route, SimState } from "../types";
+import type { LineInfo, Network, Route, RouteStation, SimState } from "../types";
 
 export type Train = {
   id: string;
@@ -15,7 +15,7 @@ export type Train = {
   heading: number;
 };
 
-type PreparedRoute = Route & {
+export type PreparedRoute = Route & {
   dist: number[];
   line: string;
   color: string;
@@ -71,7 +71,7 @@ export function seedTrains(routes: PreparedRoute[], state: SimState): Train[] {
           routeId: route.id,
           line: route.line,
           color: route.color,
-          cars: 1,
+          cars: route.cars,
           dir,
           along,
           dwell: 0,
@@ -85,43 +85,81 @@ export function seedTrains(routes: PreparedRoute[], state: SimState): Train[] {
   return trains;
 }
 
+let routeIndex: Map<string, PreparedRoute> | null = null;
+let indexedRoutes: PreparedRoute[] | null = null;
+
+function firstCrossedStop(
+  route: PreparedRoute,
+  from: number,
+  dir: 1 | -1,
+  moved: number,
+  exclude: number,
+): RouteStation | null {
+  let best: RouteStation | null = null;
+  let bestD = Infinity;
+  for (const stop of route.stations) {
+    if (stop.along === exclude) continue;
+    let d = (stop.along - from) * dir;
+    if (route.loop) d = ((d % route.length) + route.length) % route.length;
+    if (d > 0 && d <= moved && d < bestD) {
+      best = stop;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function nearestStop(route: PreparedRoute, along: number): RouteStation | null {
+  let best: RouteStation | null = null;
+  let bd = Infinity;
+  for (const s of route.stations) {
+    const d = Math.abs(s.along - along);
+    if (d < bd) {
+      bd = d;
+      best = s;
+    }
+  }
+  return bd < 60 ? best : null;
+}
+
 export function stepFleet(
   trains: Train[],
   routes: PreparedRoute[],
   state: SimState,
   dtMs: number,
 ): void {
-  const byId = new Map(routes.map((r) => [r.id, r]));
+  if (indexedRoutes !== routes || !routeIndex) {
+    routeIndex = new Map(routes.map((r) => [r.id, r]));
+    indexedRoutes = routes;
+  }
   const dt = (dtMs / 1000) * state.speed;
   for (const train of trains) {
-    const route = byId.get(train.routeId);
+    const route = routeIndex.get(train.routeId);
     if (!route) continue;
     if (train.dwell > 0) {
       train.dwell -= dtMs * state.speed;
       continue;
     }
-    train.along += CRUISE * dt * train.dir;
-    if (route.loop) {
-      train.along = ((train.along % route.length) + route.length) % route.length;
-    } else if (train.along >= route.length) {
-      train.along = route.length;
-      train.dir = -1;
+    const from = train.along;
+    const moved = CRUISE * dt;
+    train.along += moved * train.dir;
+
+    if (!route.loop && (train.along >= route.length || train.along <= 0)) {
+      const end = train.along >= route.length ? route.length : 0;
+      train.along = end;
+      train.dir = train.dir === 1 ? -1 : 1;
       train.dwell = DWELL * 0.7;
-    } else if (train.along <= 0) {
-      train.along = 0;
-      train.dir = 1;
-      train.dwell = DWELL * 0.7;
+      const term = nearestStop(route, end);
+      if (term) train.lastStop = term.along;
     } else {
-      for (const stop of route.stations) {
-        if (stop.along === train.lastStop) continue;
-        if (Math.abs(train.along - stop.along) < 12) {
-          train.dwell = DWELL;
-          train.along = stop.along;
-          train.lastStop = stop.along;
-          break;
-        }
+      const stop = firstCrossedStop(route, from, train.dir, moved, train.lastStop);
+      if (stop) {
+        train.along = stop.along;
+        train.lastStop = stop.along;
+        train.dwell = DWELL;
       }
     }
+
     const pose = pointAlong(route.coords, route.dist, route.length, train.along);
     train.coord = pose.coord;
     train.heading = pose.heading;

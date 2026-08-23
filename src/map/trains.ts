@@ -36,6 +36,12 @@ class TrainLayer implements CustomLayerInterface {
   private trains: Train[] = [];
   private originMerc = maplibregl.MercatorCoordinate.fromLngLat(ORIGIN, 0);
   private boxes: THREE.InstancedMesh;
+  private rotX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+  private local = new THREE.Matrix4();
+  private proj = new THREE.Matrix4();
+  private scaleV = new THREE.Vector3();
+  private bufW = 0;
+  private bufH = 0;
 
   constructor() {
     const geo = new THREE.BoxGeometry(BOX_LEN, 3.2, 3.2);
@@ -75,24 +81,38 @@ class TrainLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
 
+    this.syncViewport(renderer, map.getCanvas());
     this.sync(map.getZoom());
     if (this.boxes.count === 0) return;
 
     const t = this.originMerc;
     const meter = t.meterInMercatorCoordinateUnits();
-    const rotationX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-    const local = new THREE.Matrix4()
+    this.scaleV.set(meter, -meter, meter);
+    this.local
+      .identity()
       .makeTranslation(t.x, t.y, t.z)
-      .scale(new THREE.Vector3(meter, -meter, meter))
-      .multiply(rotationX);
+      .scale(this.scaleV)
+      .multiply(this.rotX);
 
-    this.camera.projectionMatrix = new THREE.Matrix4()
+    this.camera.projectionMatrix = this.proj
       .fromArray(args.defaultProjectionData.mainMatrix)
-      .multiply(local);
+      .multiply(this.local);
 
     renderer.resetState();
     renderer.render(this.scene, this.camera);
     map.triggerRepaint();
+  }
+
+  /**
+   * three는 생성 시점의 캔버스 크기로 뷰포트를 고정한다. 창 크기나 devicePixelRatio가
+   * 바뀌면 GL 뷰포트가 옛 값에 묶여 화면 일부만 그려지므로 매 프레임 맞춰 준다.
+   */
+  private syncViewport(renderer: THREE.WebGLRenderer, canvas: HTMLCanvasElement): void {
+    if (canvas.width === this.bufW && canvas.height === this.bufH) return;
+    this.bufW = canvas.width;
+    this.bufH = canvas.height;
+    renderer.setPixelRatio(1);
+    renderer.setViewport(0, 0, this.bufW, this.bufH);
   }
 
   private sync(zoom: number): void {

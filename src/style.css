@@ -29,6 +29,10 @@ body {
   background: #1a1814;
 }
 
+#app {
+  position: relative;
+}
+
 #map {
   position: absolute;
   inset: 0;
@@ -331,4 +335,10 @@ body {
   .legend {
     display: none;
   }
+}
+
+.toolbar button.is-live {
+  color: #ff6b5a;
+  border-color: rgba(255, 107, 90, 0.55);
+  background: rgba(255, 107, 90, 0.14);
 }

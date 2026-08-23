@@ -11,6 +11,7 @@ export type HudHandlers = {
   onEco: () => void;
   onNight: () => void;
   onLayers: () => void;
+  onLive: () => void;
 };
 
 export function mountHud(root: HTMLElement, network: Network, state: SimState, handlers: HudHandlers) {
@@ -30,6 +31,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       <button id="btn-under" title="지하">地下</button>
       <button id="btn-play" title="재생 속도">×1</button>
       <button id="btn-eco" title="에코">ECO</button>
+      <button id="btn-live" title="실시간 운행 (서울 열린데이터광장)">LIVE</button>
       <button id="btn-layers" title="노선">≡</button>
       <button id="btn-full" title="전체화면">⛶</button>
     </div>
@@ -53,6 +55,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const eco = root.querySelector("#btn-eco") as HTMLButtonElement;
   const under = root.querySelector("#btn-under") as HTMLButtonElement;
   const night = root.querySelector("#btn-night") as HTMLButtonElement;
+  const live = root.querySelector("#btn-live") as HTMLButtonElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -111,30 +114,75 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   play.addEventListener("click", handlers.onPlayback);
   eco.addEventListener("click", handlers.onEco);
   night.addEventListener("click", handlers.onNight);
+  live.addEventListener("click", handlers.onLive);
   root.querySelector("#btn-layers")!.addEventListener("click", () => {
     legend.hidden = !legend.hidden;
     handlers.onLayers();
   });
   root.querySelector("#btn-search-focus")!.addEventListener("click", () => search.focus());
 
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  let lastClockText = "";
+  let lastStatusText = "";
+  let lastSpeedLabel = "";
+  let lastEco: string | null = null;
+  let lastUnder: string | null = null;
+  let lastClockSec = -1;
+  let lastNight: string | null = null;
+  let liveNote = "";
   return {
     tick(now: Date, trainCount: number) {
-      clock.textContent = new Intl.DateTimeFormat("en-US", {
-        weekday: "short",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(now);
-      play.textContent = `×${state.speed}`;
-      eco.setAttribute("aria-pressed", String(state.eco));
-      under.setAttribute("aria-pressed", String(state.underground));
-      night.setAttribute("aria-pressed", String(state.night));
-      status.textContent = `${trainCount} trains  ·  ${network.stations.length} stations`;
+      const sec = Math.floor(now.getTime() / 1000);
+      if (sec !== lastClockSec) {
+        lastClockSec = sec;
+        const c = fmt.format(now);
+        if (c !== lastClockText) {
+          clock.textContent = c;
+          lastClockText = c;
+        }
+        const s = liveNote
+          ? `${trainCount} trains  ·  ${network.stations.length} stations  ·  ${liveNote}`
+          : `${trainCount} trains  ·  ${network.stations.length} stations`;
+        if (s !== lastStatusText) {
+          status.textContent = s;
+          lastStatusText = s;
+        }
+      }
+      const speedLabel = `×${state.speed}`;
+      if (speedLabel !== lastSpeedLabel) {
+        play.textContent = speedLabel;
+        lastSpeedLabel = speedLabel;
+      }
+      const ecoV = String(state.eco);
+      if (ecoV !== lastEco) {
+        eco.setAttribute("aria-pressed", ecoV);
+        lastEco = ecoV;
+      }
+      const underV = String(state.underground);
+      if (underV !== lastUnder) {
+        under.setAttribute("aria-pressed", underV);
+        lastUnder = underV;
+      }
+      const nightV = String(state.night);
+      if (nightV !== lastNight) {
+        night.setAttribute("aria-pressed", nightV);
+        lastNight = nightV;
+      }
     },
     renderLegend,
+    setLive(on: boolean, note: string) {
+      live.setAttribute("aria-pressed", String(on));
+      live.classList.toggle("is-live", on);
+      liveNote = note;
+    },
     showStation(station: Station) {
       const chips = station.lines
         .map((id) => {

@@ -45,5 +45,6 @@ export type SimState = {
   eco: boolean;
   underground: boolean;
   night: boolean;
+  live: boolean;
   hiddenLines: Set<string>;
 };
