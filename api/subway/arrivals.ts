@@ -6,8 +6,9 @@ const ROW_LIMIT = 20;
 /** 도착정보는 위치보다 빨리 변한다. 짧게 캐시한다. */
 const CACHE_SECONDS = 10;
 const STALE_SECONDS = 30;
-const UPSTREAM_TIMEOUT_MS = 8_000;
-const ATTEMPTS = 2;
+/** 사용자가 팝업을 열어 두고 기다리는 요청이라 짧게 한 번만 시도한다. */
+const UPSTREAM_TIMEOUT_MS = 6_000;
+const ATTEMPTS = 1;
 
 /**
  * 역명 허용 문자. 한글·영문·숫자와 역명에 실제로 쓰이는 기호만 통과시켜

@@ -1,18 +1,21 @@
 import type { Train } from "../sim/fleet";
-import { fetchAllPositions, LiveApiError } from "./client";
+import { fetchPositions, LiveApiError, QuotaExceededError } from "./client";
+import type { LiveLine } from "./lines";
 import { placeLiveTrains, type PlaceStats, type RouteIndex } from "./place";
 
 /**
- * 폴링 주기(ms). 상류 데이터가 실측 15~20초마다 갱신되므로 그보다 짧게 잡아도
- * 같은 값만 받는다. 노선당 1회 호출이라 한 번에 LIVE_LINES.length(17)회를 쓴다.
+ * 폴링 주기(ms). 상류 데이터는 실측 15~20초마다 갱신되지만, 인증키 일일 한도가
+ * 1,000건이라 갱신 주기에 맞출 수 없다. 화면에 보이는 노선만 부르는 것,
+ * 탭이 가려지면 멈추는 것과 함께 한도를 지키는 장치다.
  */
-const POLL_MS = 15_000;
+const POLL_MS = 30_000;
 /** 연속 실패 시 최대 대기(ms). */
 const MAX_BACKOFF_MS = 5 * 60_000;
 
 export type LiveStatus =
   | { kind: "idle" }
   | { kind: "loading" }
+  | { kind: "paused" }
   | {
       kind: "ok";
       trains: number;
@@ -21,6 +24,7 @@ export type LiveStatus =
       stats: PlaceStats;
       at: Date;
     }
+  | { kind: "quota"; message: string }
   | { kind: "error"; message: string; retryInSec: number };
 
 export type LiveController = {
@@ -30,8 +34,12 @@ export type LiveController = {
   readonly running: boolean;
 };
 
+/** 이번 폴링에서 부를 노선을 고른다. 빈 배열이면 호출하지 않는다. */
+export type LineSelector = () => LiveLine[];
+
 export function createLiveController(
   index: RouteIndex,
+  selectLines: LineSelector,
   onTrains: (trains: Train[]) => void,
   onStatus: (status: LiveStatus) => void,
 ): LiveController {
@@ -39,7 +47,9 @@ export function createLiveController(
   let abort: AbortController | null = null;
   let running = false;
   let failures = 0;
-  /** 노선별 마지막 성공 스냅샷. 일부 노선이 실패해도 열차가 사라지지 않게 한다. */
+  /** 한도를 소진하면 그날은 더 부르지 않는다. */
+  let quotaExhausted = false;
+  /** 노선별 마지막 성공 스냅샷. 부르지 않았거나 실패한 노선도 그대로 유지한다. */
   const lastByLine = new Map<string, Train[]>();
 
   const clearTimer = () => {
@@ -51,18 +61,33 @@ export function createLiveController(
 
   const schedule = (delay: number) => {
     clearTimer();
-    if (!running) return;
+    if (!running || quotaExhausted) return;
     timer = setTimeout(poll, delay);
   };
 
   async function poll(): Promise<void> {
-    if (!running) return;
+    if (!running || quotaExhausted) return;
+
+    // 탭이 가려져 있으면 부르지 않는다. 보이지 않는 화면에 한도를 쓸 이유가 없다.
+    if (document.hidden) {
+      onStatus({ kind: "paused" });
+      schedule(POLL_MS);
+      return;
+    }
+
+    const lines = selectLines();
+    if (lines.length === 0) {
+      onStatus({ kind: "paused" });
+      schedule(POLL_MS);
+      return;
+    }
+
     abort?.abort();
     abort = new AbortController();
     onStatus({ kind: "loading" });
 
     try {
-      const result = await fetchAllPositions(abort.signal);
+      const result = await fetchPositions(lines, abort.signal);
       const { trains, stats } = placeLiveTrains(result.trains, index);
 
       const placedByLine = new Map<string, Train[]>();
@@ -72,17 +97,12 @@ export function createLiveController(
         else placedByLine.set(t.line, [t]);
       }
 
-      const merged: Train[] = [];
       for (const r of result.results) {
-        if (r.ok) {
-          const fresh = placedByLine.get(r.line) ?? [];
-          lastByLine.set(r.line, fresh);
-          merged.push(...fresh);
-        } else {
-          // 이번 폴링에서 실패한 노선은 직전 위치를 그대로 유지한다.
-          merged.push(...(lastByLine.get(r.line) ?? []));
-        }
+        if (r.ok) lastByLine.set(r.line, placedByLine.get(r.line) ?? []);
       }
+
+      const merged: Train[] = [];
+      for (const list of lastByLine.values()) merged.push(...list);
 
       failures = 0;
       onTrains(merged);
@@ -97,6 +117,15 @@ export function createLiveController(
       schedule(POLL_MS);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
+
+      if (error instanceof QuotaExceededError) {
+        // 더 부르면 한도만 축낸다. 그날은 여기서 멈춘다.
+        quotaExhausted = true;
+        clearTimer();
+        onStatus({ kind: "quota", message: error.message });
+        return;
+      }
+
       failures += 1;
       const delay = Math.min(POLL_MS * 2 ** (failures - 1), MAX_BACKOFF_MS);
       const message =
@@ -106,23 +135,35 @@ export function createLiveController(
     }
   }
 
+  // 탭이 다시 보이면 곧바로 한 번 갱신한다.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && running && !quotaExhausted) {
+      clearTimer();
+      void poll();
+    }
+  });
+
   return {
     start() {
       if (running) return;
+      if (quotaExhausted) {
+        onStatus({ kind: "quota", message: "오늘 실시간 조회 한도를 모두 사용했습니다." });
+        return;
+      }
       running = true;
       failures = 0;
       void poll();
     },
     stop() {
       running = false;
-      lastByLine.clear();
       clearTimer();
       abort?.abort();
       abort = null;
+      lastByLine.clear();
       onStatus({ kind: "idle" });
     },
     refresh() {
-      if (running) void poll();
+      if (running && !quotaExhausted) void poll();
     },
     get running() {
       return running;

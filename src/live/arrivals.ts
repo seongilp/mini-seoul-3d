@@ -1,3 +1,4 @@
+import { isQuotaCode } from "./client";
 import { SUBWAY_ID_TO_LINE } from "./subwayIds";
 
 /** arvlCd: 열차의 조회 역 기준 상태. */
@@ -93,6 +94,9 @@ export async function fetchStationArrivals(
 
   const code = body.errorMessage?.code ?? body.code;
   if (code === "INFO-200") return [];
+  if (isQuotaCode(code)) {
+    throw new ArrivalsError("오늘 실시간 조회 한도를 모두 사용했습니다.");
+  }
   if (code && code !== "INFO-000") {
     throw new ArrivalsError(body.errorMessage?.message ?? "도착정보를 제공하지 않는 역입니다.");
   }

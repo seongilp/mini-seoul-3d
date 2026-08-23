@@ -57,6 +57,16 @@ function normalizeRow(row: RawRow, meta: LiveLine): LiveTrain | null {
 
 export class LiveApiError extends Error {}
 
+/** 인증키 일일 호출 한도 초과. 그날은 더 불러봐야 소용없다. */
+export class QuotaExceededError extends LiveApiError {}
+
+/** 열린데이터광장의 호출 한도 계열 오류 코드. */
+const QUOTA_CODES = new Set(["ERROR-335", "ERROR-336", "ERROR-337"]);
+
+export function isQuotaCode(code: string | undefined): boolean {
+  return code !== undefined && QUOTA_CODES.has(code);
+}
+
 export type LineResult =
   | { line: string; ok: true; trains: LiveTrain[] }
   | { line: string; ok: false; message: string };
@@ -92,6 +102,9 @@ async function fetchLine(meta: LiveLine, signal?: AbortSignal): Promise<LineResu
 
   const code = body.errorMessage?.code ?? body.code;
   if (code === "INFO-200") return { line: meta.line, ok: true, trains: [] };
+  if (isQuotaCode(code)) {
+    throw new QuotaExceededError(body.errorMessage?.message ?? body.message ?? "일일 호출 한도 초과");
+  }
   if (code && code !== "INFO-000") {
     return {
       line: meta.line,
@@ -119,11 +132,16 @@ export type FetchResult = {
 };
 
 /**
- * 제공되는 모든 노선을 한 번에 가져온다.
- * 노선당 1회 호출이므로 호출 수 = LIVE_LINES.length.
+ * 지정한 노선들의 위치를 가져온다. 노선당 1회 호출이므로 호출 수 = lines.length.
+ * 인증키 일일 한도가 빠듯하므로 화면에 보이는 노선만 넘기는 것이 중요하다.
  */
-export async function fetchAllPositions(signal?: AbortSignal): Promise<FetchResult> {
-  const settled = await Promise.all(LIVE_LINES.map((meta) => fetchLine(meta, signal)));
+export async function fetchPositions(
+  lines: LiveLine[] = LIVE_LINES,
+  signal?: AbortSignal,
+): Promise<FetchResult> {
+  if (lines.length === 0) return { trains: [], results: [], calls: 0 };
+
+  const settled = await Promise.all(lines.map((meta) => fetchLine(meta, signal)));
 
   const trains: LiveTrain[] = [];
   for (const r of settled) {
@@ -134,5 +152,5 @@ export async function fetchAllPositions(signal?: AbortSignal): Promise<FetchResu
     throw new LiveApiError(settled[0]?.message ?? "모든 노선 호출이 실패했습니다.");
   }
 
-  return { trains, results: settled, calls: LIVE_LINES.length };
+  return { trains, results: settled, calls: lines.length };
 }
