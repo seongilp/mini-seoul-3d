@@ -19,6 +19,8 @@ export type LiveTrain = {
   statnId: number;
   /** 종착역 번호. */
   terminalId: number;
+  /** "0" = 상행/내선, "1" = 하행/외선. 순환선 방향 판정에 쓴다. */
+  updown: string;
   status: string;
   /** 급행 여부. */
   express: boolean;
@@ -45,6 +47,7 @@ function normalizeRow(row: RawRow, meta: LiveLine): LiveTrain | null {
     destination: str(row, "statnTnm"),
     statnId: Number.parseInt(str(row, "statnId"), 10) || 0,
     terminalId: Number.parseInt(str(row, "statnTid"), 10) || 0,
+    updown: str(row, "updnLine"),
     status: str(row, "trainSttus"),
     express: str(row, "directAt") !== "0",
     isLastTrain: str(row, "lstcarAt") === "1",

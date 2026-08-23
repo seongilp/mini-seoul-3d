@@ -132,18 +132,21 @@ function directionOf(
 ): 1 | -1 | null {
   const { live, entry, stationIndex } = anchor;
 
+  if (entry.route.loop) {
+    // 순환선은 종착역이 되감김 너머에 있을 수 있어(홍대입구 → 성수 종착) statnId
+    // 차이로는 방향을 알 수 없다. 내선/외선 표기를 쓴다.
+    // updnLine "0" = 내선 = statnId 증가 방향.
+    if (orientation === 0 || live.updown === "") return null;
+    return ((live.updown === "0" ? 1 : -1) * orientation) as 1 | -1;
+  }
+
   if (orientation !== 0 && live.statnId > 0 && live.terminalId > 0) {
     const delta = live.terminalId - live.statnId;
     if (delta !== 0) return ((delta > 0 ? 1 : -1) * orientation) as 1 | -1;
   }
 
   const destIndex = resolveByName(entry, index, live.destination);
-  if (destIndex >= 0 && destIndex !== stationIndex) {
-    if (!entry.route.loop) return destIndex > stationIndex ? 1 : -1;
-    const count = entry.route.stations.length;
-    const forward = (destIndex - stationIndex + count) % count;
-    return forward <= count / 2 ? 1 : -1;
-  }
+  if (destIndex >= 0 && destIndex !== stationIndex) return destIndex > stationIndex ? 1 : -1;
 
   return null;
 }
