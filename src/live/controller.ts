@@ -39,6 +39,8 @@ export function createLiveController(
   let abort: AbortController | null = null;
   let running = false;
   let failures = 0;
+  /** 노선별 마지막 성공 스냅샷. 일부 노선이 실패해도 열차가 사라지지 않게 한다. */
+  const lastByLine = new Map<string, Train[]>();
 
   const clearTimer = () => {
     if (timer !== null) {
@@ -62,11 +64,31 @@ export function createLiveController(
     try {
       const result = await fetchAllPositions(abort.signal);
       const { trains, stats } = placeLiveTrains(result.trains, index);
+
+      const placedByLine = new Map<string, Train[]>();
+      for (const t of trains) {
+        const list = placedByLine.get(t.line);
+        if (list) list.push(t);
+        else placedByLine.set(t.line, [t]);
+      }
+
+      const merged: Train[] = [];
+      for (const r of result.results) {
+        if (r.ok) {
+          const fresh = placedByLine.get(r.line) ?? [];
+          lastByLine.set(r.line, fresh);
+          merged.push(...fresh);
+        } else {
+          // 이번 폴링에서 실패한 노선은 직전 위치를 그대로 유지한다.
+          merged.push(...(lastByLine.get(r.line) ?? []));
+        }
+      }
+
       failures = 0;
-      onTrains(trains);
+      onTrains(merged);
       onStatus({
         kind: "ok",
-        trains: trains.length,
+        trains: merged.length,
         calls: result.calls,
         failedLines: result.results.filter((r) => !r.ok).map((r) => r.line),
         stats,
@@ -93,6 +115,7 @@ export function createLiveController(
     },
     stop() {
       running = false;
+      lastByLine.clear();
       clearTimer();
       abort?.abort();
       abort = null;

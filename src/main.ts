@@ -108,7 +108,8 @@ function describeLive(status: LiveStatus): string {
     case "ok": {
       const dropped = status.stats.unknownStation + status.stats.unknownDirection;
       const note = dropped > 0 ? ` · 미배치 ${dropped}` : "";
-      const failed = status.failedLines.length > 0 ? ` · 실패 ${status.failedLines.join(",")}` : "";
+      const failed =
+        status.failedLines.length > 0 ? ` · 지연 ${status.failedLines.join("/")}호선` : "";
       return `LIVE ${status.at.toLocaleTimeString("ko-KR")}${note}${failed}`;
     }
     case "error":

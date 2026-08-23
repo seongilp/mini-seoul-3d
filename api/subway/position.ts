@@ -34,6 +34,9 @@ const ROW_LIMIT = 300;
  */
 const CACHE_SECONDS = 20;
 const STALE_SECONDS = 60;
+/** 상류가 간헐적으로 느려서 한 번은 다시 시도한다. */
+const UPSTREAM_TIMEOUT_MS = 8_000;
+const ATTEMPTS = 2;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.SUBWAY;
@@ -52,21 +55,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const url = `${UPSTREAM}/api/subway/${key}/json/realtimePosition/0/${ROW_LIMIT}/${encodeURIComponent(line)}`;
 
-  try {
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    const body = await upstream.text();
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    try {
+      const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+      const body = await upstream.text();
 
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.setHeader(
-      "Cache-Control",
-      `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`,
-    );
-    res.status(upstream.ok ? 200 : 502).send(body);
-  } catch (error) {
-    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
-    res.status(504).json({
-      code: timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_ERROR",
-      message: timedOut ? "실시간 API 응답이 지연됩니다." : "실시간 API 호출에 실패했습니다.",
-    });
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader(
+        "Cache-Control",
+        `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=${STALE_SECONDS}, stale-if-error=${STALE_SECONDS}`,
+      );
+      res.status(upstream.ok ? 200 : 502).send(body);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  const timedOut = lastError instanceof DOMException && lastError.name === "TimeoutError";
+  res.status(504).json({
+    code: timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_ERROR",
+    message: timedOut ? "실시간 API 응답이 지연됩니다." : "실시간 API 호출에 실패했습니다.",
+  });
 }
