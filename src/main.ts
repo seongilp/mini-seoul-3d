@@ -99,6 +99,9 @@ const hud = mountHud(hudRoot, network, state, {
   },
 });
 
+/** ?debug 를 붙이면 배치 실패·노선 지연 같은 진단 정보를 상태줄에 표시한다. */
+const DEBUG = new URLSearchParams(location.search).has("debug");
+
 function describeLive(status: LiveStatus): string {
   switch (status.kind) {
     case "idle":
@@ -106,14 +109,16 @@ function describeLive(status: LiveStatus): string {
     case "loading":
       return "LIVE 불러오는 중";
     case "ok": {
+      const time = `LIVE ${status.at.toLocaleTimeString("ko-KR")}`;
+      if (!DEBUG) return time;
       const dropped = status.stats.unknownStation + status.stats.unknownDirection;
       const note = dropped > 0 ? ` · 미배치 ${dropped}` : "";
       const failed =
-        status.failedLines.length > 0 ? ` · 지연 ${status.failedLines.join("/")}호선` : "";
-      return `LIVE ${status.at.toLocaleTimeString("ko-KR")}${note}${failed}`;
+        status.failedLines.length > 0 ? ` · 지연 ${status.failedLines.join("/")}` : "";
+      return `${time}${note}${failed}`;
     }
     case "error":
-      return `LIVE 오류 · ${status.retryInSec}초 후 재시도`;
+      return DEBUG ? `LIVE 오류 · ${status.retryInSec}초 후 재시도` : "LIVE 재연결 중";
   }
 }
 
