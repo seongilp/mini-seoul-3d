@@ -1,11 +1,16 @@
 import maplibregl from "maplibre-gl";
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type {
+  CustomLayerInterface,
+  CustomRenderMethodInput,
+  Map as MapLibreMap,
+} from "maplibre-gl";
 import * as THREE from "three";
 import type { Train } from "../sim/fleet";
 
 const ORIGIN: [number, number] = [126.9784, 37.5665];
 const BOX_LEN = 10;
 const MAX = 512;
+const LAYER_ID = "metro-trains-3d";
 
 function trainScale(zoom: number): number {
   const metersPerPx = (156543.03392 * Math.cos((37.5665 * Math.PI) / 180)) / 2 ** zoom;
@@ -13,9 +18,17 @@ function trainScale(zoom: number): number {
   return Math.max(1.6, (targetPx * metersPerPx) / BOX_LEN);
 }
 
-class MetroTrainOverlay {
-  private canvas: HTMLCanvasElement;
-  private renderer: THREE.WebGLRenderer;
+/**
+ * MapLibre 커스텀 3D 레이어. 맵의 GL 컨텍스트와 투영 행렬을 그대로 사용해서
+ * 열차 박스를 노선 위에 정확히 올린다.
+ */
+class TrainLayer implements CustomLayerInterface {
+  readonly id = LAYER_ID;
+  readonly type = "custom" as const;
+  readonly renderingMode = "3d" as const;
+
+  private map: MapLibreMap | null = null;
+  private renderer: THREE.WebGLRenderer | null = null;
   private camera = new THREE.Camera();
   private scene = new THREE.Scene();
   private dummy = new THREE.Object3D();
@@ -24,21 +37,7 @@ class MetroTrainOverlay {
   private originMerc = maplibregl.MercatorCoordinate.fromLngLat(ORIGIN, 0);
   private boxes: THREE.InstancedMesh;
 
-  constructor(map: MapLibreMap) {
-    this.canvas = document.createElement("canvas");
-    this.canvas.id = "train-overlay";
-    this.canvas.setAttribute("aria-hidden", "true");
-    (map.getCanvas().parentElement ?? map.getContainer()).appendChild(this.canvas);
-
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      alpha: true,
-      antialias: true,
-      premultipliedAlpha: true,
-    });
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.autoClear = true;
-
+  constructor() {
     const geo = new THREE.BoxGeometry(BOX_LEN, 3.2, 3.2);
     geo.translate(0, 1.6, 0);
     const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -53,33 +52,47 @@ class MetroTrainOverlay {
     this.trains = trains;
   }
 
-  draw(map: MapLibreMap): void {
-    const host = map.getCanvas();
-    const w = host.clientWidth;
-    const h = host.clientHeight;
-    if (w < 2 || h < 2) return;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.setSize(w, h, false);
+  onAdd(map: MapLibreMap, gl: WebGL2RenderingContext | WebGLRenderingContext): void {
+    this.map = map;
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: map.getCanvas(),
+      context: gl,
+      antialias: true,
+    });
+    this.renderer.autoClear = false;
+  }
+
+  onRemove(): void {
+    this.scene.clear();
+    this.boxes.dispose();
+    this.renderer?.dispose();
+    this.renderer = null;
+    this.map = null;
+  }
+
+  render(_gl: unknown, args: CustomRenderMethodInput): void {
+    const map = this.map;
+    const renderer = this.renderer;
+    if (!map || !renderer) return;
 
     this.sync(map.getZoom());
+    if (this.boxes.count === 0) return;
 
     const t = this.originMerc;
     const meter = t.meterInMercatorCoordinateUnits();
-    const proj = map.transform.getProjectionDataForCustomLayer(false);
     const rotationX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-    const m = new THREE.Matrix4().fromArray(proj.mainMatrix);
-    const l = new THREE.Matrix4()
+    const local = new THREE.Matrix4()
       .makeTranslation(t.x, t.y, t.z)
       .scale(new THREE.Vector3(meter, -meter, meter))
       .multiply(rotationX);
-    this.camera.projectionMatrix = m.multiply(l);
-    this.renderer.render(this.scene, this.camera);
-  }
 
-  dispose(): void {
-    this.scene.clear();
-    this.renderer.dispose();
-    this.canvas.remove();
+    this.camera.projectionMatrix = new THREE.Matrix4()
+      .fromArray(args.defaultProjectionData.mainMatrix)
+      .multiply(local);
+
+    renderer.resetState();
+    renderer.render(this.scene, this.camera);
+    map.triggerRepaint();
   }
 
   private sync(zoom: number): void {
@@ -107,24 +120,23 @@ class MetroTrainOverlay {
   }
 }
 
-let overlay: MetroTrainOverlay | null = null;
+let layer: TrainLayer | null = null;
 
 export function addTrainLayers(map: MapLibreMap, trains: Train[]): void {
-  for (const id of ["metro-trains-3d", "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
+  for (const id of [LAYER_ID, "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
     if (map.getLayer(id)) map.removeLayer(id);
   }
   if (map.getSource("metro-trains")) map.removeSource("metro-trains");
 
-  if (overlay) {
-    overlay.dispose();
-    overlay = null;
-  }
-  overlay = new MetroTrainOverlay(map);
-  overlay.setTrains(trains);
+  document.querySelector("#train-overlay")?.remove();
+
+  layer = new TrainLayer();
+  layer.setTrains(trains);
+  map.addLayer(layer);
 }
 
 export function updateTrains(map: MapLibreMap, trains: Train[]): void {
-  if (!overlay) return;
-  overlay.setTrains(trains);
-  overlay.draw(map);
+  if (!layer || !map.getLayer(LAYER_ID)) return;
+  layer.setTrains(trains);
+  map.triggerRepaint();
 }

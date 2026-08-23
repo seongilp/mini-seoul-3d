@@ -4,3 +4,5 @@ raw
 .DS_Store
 *.log
 .gstack/
+.vercel
+.env*
