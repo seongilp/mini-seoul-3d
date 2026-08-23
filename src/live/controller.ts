@@ -3,10 +3,10 @@ import { fetchAllPositions, LiveApiError } from "./client";
 import { placeLiveTrains, type PlaceStats, type RouteIndex } from "./place";
 
 /**
- * 폴링 주기(ms). 노선당 1회 호출이므로 한 번 폴링에 LIVE_LINES.length(17)회를 쓴다.
- * 60초 주기면 하루 약 24,480회. 인증키 일일 한도에 맞춰 조정해야 한다.
+ * 폴링 주기(ms). 상류 데이터가 실측 15~20초마다 갱신되므로 그보다 짧게 잡아도
+ * 같은 값만 받는다. 노선당 1회 호출이라 한 번에 LIVE_LINES.length(17)회를 쓴다.
  */
-const POLL_MS = 60_000;
+const POLL_MS = 15_000;
 /** 연속 실패 시 최대 대기(ms). */
 const MAX_BACKOFF_MS = 5 * 60_000;
 

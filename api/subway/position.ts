@@ -29,10 +29,10 @@ const UPSTREAM = "http://swopenapi.seoul.go.kr";
 /** 노선당 최대 열차 수. 1호선이 80대 안팎이라 넉넉히 잡는다. */
 const ROW_LIMIT = 300;
 /**
- * CDN 캐시 수명(초). 상류 데이터가 20~30초 주기로 갱신되므로 그보다 짧게 잡을
- * 이유가 없다. 방문자가 몇 명이든 이 주기당 상류 호출은 노선별 1회로 묶인다.
+ * CDN 캐시 수명(초). 클라이언트 폴링 주기(15초)보다 길면 캐시가 갱신을 붙잡아
+ * 폴링을 당긴 효과가 사라진다. 동시 접속자 묶기와 신선도의 절충값.
  */
-const CACHE_SECONDS = 20;
+const CACHE_SECONDS = 10;
 const STALE_SECONDS = 60;
 /** 상류가 간헐적으로 느려서 한 번은 다시 시도한다. */
 const UPSTREAM_TIMEOUT_MS = 8_000;
