@@ -29,11 +29,10 @@ const UPSTREAM = "http://swopenapi.seoul.go.kr";
 /** 노선당 최대 열차 수. 1호선이 80대 안팎이라 넉넉히 잡는다. */
 const ROW_LIMIT = 300;
 /**
- * CDN 캐시 수명(초). 클라이언트 폴링 주기와 같게 둔다. 인증키 일일 한도가
- * 1,000건이라, 방문자가 여러 명일 때 상류 호출을 이 주기당 1회로 묶는 것이
- * 캐시의 핵심 역할이다.
+ * CDN 캐시 수명(초). 클라이언트 폴링 주기와 같게 둔다.
+ * 방문자가 여러 명일 때 상류 호출을 이 주기당 1회로 묶는다.
  */
-const CACHE_SECONDS = 30;
+const CACHE_SECONDS = 15;
 const STALE_SECONDS = 60;
 /** 상류가 간헐적으로 느려서 한 번은 다시 시도한다. */
 const UPSTREAM_TIMEOUT_MS = 8_000;
