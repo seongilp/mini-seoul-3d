@@ -127,44 +127,22 @@ function describeLive(status: LiveStatus): string {
   }
 }
 
-/** 노선별 경계 상자. 화면 밖 노선을 부르지 않기 위해 한 번만 계산한다. */
-const lineBounds = new Map<string, [number, number, number, number]>();
-for (const route of routes) {
-  const prev = lineBounds.get(route.line);
-  let [w, s2, e, n] = prev ?? [Infinity, Infinity, -Infinity, -Infinity];
-  for (const [lng, lat] of route.coords) {
-    if (lng < w) w = lng;
-    if (lng > e) e = lng;
-    if (lat < s2) s2 = lat;
-    if (lat > n) n = lat;
-  }
-  lineBounds.set(route.line, [w, s2, e, n]);
-}
-
 /**
- * 이번 폴링에서 부를 노선. 인증키 일일 한도가 1,000건이라 17개 노선을 매번
- * 부를 수 없다. 사용자가 켜 둔 노선 중 화면에 걸치는 것만 고른다.
+ * 이번 폴링에서 부를 노선.
+ *
+ * 인증키 한도가 풀리기 전에는 화면에 걸치는 노선만 불렀는데, 그러면 지도를
+ * 옮겼을 때 그 지역 열차가 낡은 위치로 보인다. 지금은 켜져 있는 노선을 모두
+ * 부른다. 사용자가 범례에서 끈 노선은 화면에 그리지 않으므로 제외한다.
  */
-function visibleLines(): LiveLine[] {
-  const b = map.getBounds();
-  const west = b.getWest();
-  const south = b.getSouth();
-  const east = b.getEast();
-  const north = b.getNorth();
-
-  return LIVE_LINES.filter((meta) => {
-    if (state.hiddenLines.has(meta.line)) return false;
-    const box = lineBounds.get(meta.line);
-    if (!box) return false;
-    return box[0] <= east && box[2] >= west && box[1] <= north && box[3] >= south;
-  });
+function activeLines(): LiveLine[] {
+  return LIVE_LINES.filter((meta) => !state.hiddenLines.has(meta.line));
 }
 
 const liveFleet = new LiveFleet(routes);
 
 const liveTrains = createLiveController(
   new RouteIndex(routes, network.stations),
-  visibleLines,
+  activeLines,
   (next) => {
     liveFleet.update(next, performance.now());
   },
