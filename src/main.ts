@@ -5,6 +5,7 @@ import { addTransitLayers } from "./map/layers";
 import { addTrainLayers, updateTrains } from "./map/trains";
 import { prepareRoutes, seedTrains, stepFleet, type Train } from "./sim/fleet";
 import type { Network, SimState } from "./types";
+import { loadTimetable, type Timetable } from "./data/timetable";
 import { createLiveController, type LiveStatus } from "./live/controller";
 import { LiveFleet } from "./live/interpolate";
 import { LIVE_LINES, type LiveLine } from "./live/lines";
@@ -57,7 +58,7 @@ const hud = mountHud(hudRoot, network, state, {
     if (state.hiddenLines.has(id)) state.hiddenLines.delete(id);
     else state.hiddenLines.add(id);
     addTransitLayers(map, network, state.hiddenLines);
-    trains = seedTrains(routes, state);
+    trains = seedTrains(routes, state, timetable);
     hud.renderLegend();
   },
   onZoom(delta) {
@@ -80,7 +81,7 @@ const hud = mountHud(hudRoot, network, state, {
   },
   onEco() {
     state.eco = !state.eco;
-    trains = seedTrains(routes, state);
+    trains = seedTrains(routes, state, timetable);
   },
   onNight() {
     state.night = !state.night;
@@ -95,7 +96,7 @@ const hud = mountHud(hudRoot, network, state, {
     } else {
       liveTrains.stop();
       liveFleet.clear();
-      trains = seedTrains(routes, state);
+      trains = seedTrains(routes, state, timetable);
     }
   },
 });
@@ -114,7 +115,7 @@ function describeLive(status: LiveStatus): string {
     case "quota":
       return "실시간 조회 한도 소진 · 내일 다시 사용할 수 있습니다";
     case "ok": {
-      const time = `LIVE ${status.at.toLocaleTimeString("ko-KR")}`;
+      const time = `LIVE ${status.at.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul" })}`;
       if (!DEBUG) return time;
       const dropped = status.stats.unknownStation + status.stats.unknownDirection;
       const note = dropped > 0 ? ` · 미배치 ${dropped}` : "";
@@ -153,7 +154,7 @@ const liveTrains = createLiveController(
       console.warn("live quota:", status.message);
       state.live = false;
       liveFleet.clear();
-      trains = seedTrains(routes, state);
+      trains = seedTrains(routes, state, timetable);
     }
     hud.setLive(state.live, describeLive(status));
   },
@@ -203,6 +204,17 @@ function paintOverlay() {
   }
 }
 
+/**
+ * 시간표는 없어도 앱이 동작하므로 시작을 막지 않는다. 도착하면 HUD 에 넘기고
+ * 시뮬레이션 운행 시간대 판정에 쓴다.
+ */
+let timetable: Timetable | null = null;
+void loadTimetable().then((loaded) => {
+  timetable = loaded;
+  hud.setTimetable(loaded);
+  if (!state.live) trains = seedTrains(routes, state, timetable);
+});
+
 map.on("style.load", paintOverlay);
 if (map.isStyleLoaded()) paintOverlay();
 
@@ -231,6 +243,23 @@ map.on("mouseleave", "metro-station-ring", () => {
   map.getCanvas().style.cursor = "";
 });
 
+/**
+ * 운행 중인 노선 집합을 나타내는 문자열. 시뮬레이션 시계는 최대 15배속이라
+ * 첫차·막차 경계를 수시로 넘는다. 이 값이 바뀌면 열차를 다시 배치한다.
+ */
+function serviceSignature(clockMs: number): string {
+  if (!timetable) return "";
+  const at = new Date(clockMs);
+  return routes
+    .map((r) => (timetable!.isInService(r.line, at) ? "1" : "0"))
+    .join("");
+}
+
+let lastSignature = "";
+let signatureCheckedAt = 0;
+/** 경계 판정은 분 단위라 자주 볼 필요가 없다. */
+const SIGNATURE_INTERVAL_MS = 1000;
+
 let frameNo = 0;
 let pendingDt = 0;
 function frame(now: number) {
@@ -245,6 +274,14 @@ function frame(now: number) {
       if (liveFleet.hasData()) trains = liveFleet.sample(now);
       else stepFleet(trains, routes, state, pendingDt);
     } else {
+      if (timetable && now - signatureCheckedAt > SIGNATURE_INTERVAL_MS) {
+        signatureCheckedAt = now;
+        const signature = serviceSignature(state.clockMs);
+        if (signature !== lastSignature) {
+          lastSignature = signature;
+          trains = seedTrains(routes, state, timetable);
+        }
+      }
       stepFleet(trains, routes, state, pendingDt);
     }
     pendingDt = 0;

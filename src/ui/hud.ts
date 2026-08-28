@@ -1,4 +1,5 @@
 import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
+import { displayTime, type Timetable } from "../data/timetable";
 import type { Network, SimState, Station } from "../types";
 
 export type HudHandlers = {
@@ -122,7 +123,10 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   });
   root.querySelector("#btn-search-focus")!.addEventListener("click", () => search.focus());
 
+  // 서울 지하철 모형이라 시계도 서울 시각으로 보여 준다. 시간표·첫차·막차와
+  // 기준이 어긋나지 않게 하려는 것이기도 하다.
   const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
     weekday: "short",
     year: "numeric",
     month: "short",
@@ -140,6 +144,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let lastNight: string | null = null;
   let liveNote = "";
   let arrivalsAbort: AbortController | null = null;
+  let timetable: Timetable | null = null;
+  let shownStation: Station | null = null;
 
   const colorOf = (lineId: string | null) =>
     network.lines.find((l) => l.id === lineId)?.color ?? "#8a8a8a";
@@ -195,6 +201,47 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         row.append(dot, body);
         host.appendChild(row);
       }
+    }
+  };
+
+  /** 첫차·막차. 서울교통공사 1~9호선만 데이터가 있다. */
+  const renderTimetable = (station: Station) => {
+    const host = popup.querySelector("#timetable") as HTMLElement | null;
+    if (!host) return;
+    if (!timetable) {
+      host.hidden = true;
+      return;
+    }
+
+    const rows = timetable.edgesFor(station.id, new Date());
+    if (rows.length === 0) {
+      host.hidden = true;
+      return;
+    }
+
+    host.hidden = false;
+    host.innerHTML = `<div class="timetable-head">첫차 · 막차</div>`;
+    for (const { line, direction, edge } of rows) {
+      const meta = network.lines.find((l) => l.id === line);
+      const row = document.createElement("div");
+      row.className = "tt-row";
+
+      const dot = document.createElement("span");
+      dot.className = "tt-dot";
+      dot.style.background = meta?.color ?? "#8a8a8a";
+
+      const dest = document.createElement("span");
+      dest.className = "tt-dest";
+      // 첫차와 막차의 종착역이 다를 수 있어 둘 다 보여 준다.
+      dest.textContent = edge[1] === edge[3] ? `${edge[1]}행` : `${edge[1]}행 / ${edge[3]}행`;
+
+      const times = document.createElement("span");
+      times.className = "tt-times";
+      times.textContent = `${displayTime(edge[0])} – ${displayTime(edge[2])}`;
+
+      row.append(dot, dest, times);
+      host.appendChild(row);
+      void direction;
     }
   };
 
@@ -280,16 +327,25 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         <div class="en"></div>
         <div class="chips">${chips}</div>
         <div class="arrivals" id="arrivals"><div class="arrivals-loading">도착정보 불러오는 중…</div></div>
+        <div class="timetable" id="timetable" hidden></div>
       `;
       // 역명은 외부 데이터라 textContent 로 넣는다.
       popup.querySelector("h2")!.textContent = station.name;
       popup.querySelector(".en")!.textContent = station.nameEn;
+      shownStation = station;
       loadArrivals(station);
+      renderTimetable(station);
     },
     hideStation() {
       arrivalsAbort?.abort();
       arrivalsAbort = null;
+      shownStation = null;
       popup.hidden = true;
+    },
+    /** 시간표는 늦게 도착할 수 있다. 팝업이 열려 있으면 다시 그린다. */
+    setTimetable(next: Timetable | null) {
+      timetable = next;
+      if (shownStation && !popup.hidden) renderTimetable(shownStation);
     },
   };
 }

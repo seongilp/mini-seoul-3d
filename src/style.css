@@ -241,6 +241,9 @@ body {
   left: 16px;
   top: 108px;
   width: min(300px, calc(100vw - 32px));
+  /* 환승역은 노선이 많아 팝업이 길어진다. 화면을 넘기지 않게 잘라 준다. */
+  max-height: calc(100vh - 130px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 16px;
@@ -350,7 +353,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  max-height: 260px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
@@ -406,4 +409,52 @@ body {
   font-size: 11.5px;
   color: var(--muted);
   margin-top: 2px;
+}
+
+.timetable {
+  margin-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.timetable[hidden] {
+  display: none;
+}
+
+.timetable-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 7px;
+}
+
+.tt-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.tt-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.tt-dest {
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-times {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-left: auto;
+  flex: none;
 }

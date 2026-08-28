@@ -1,3 +1,4 @@
+import type { Timetable } from "../data/timetable";
 import { cumulative, pointAlong } from "../geo";
 import type { LineInfo, Network, Route, RouteStation, SimState } from "../types";
 
@@ -28,6 +29,10 @@ export type PreparedRoute = Route & {
 const CRUISE = 15.5;
 const DWELL = 14000;
 
+/**
+ * 시간대별 운행 밀도. 실제 시간표가 아니라 러시아워를 흉내 낸 값이다.
+ * 운행 여부 자체는 시간표(Timetable)가 있으면 그쪽이 정한다.
+ */
 function hourFactor(clockMs: number): number {
   const hour = new Date(clockMs).getHours();
   if (hour >= 1 && hour < 5) return 0.08;
@@ -61,11 +66,23 @@ function terminalName(route: PreparedRoute, dir: 1 | -1): string {
   return end ? end.name : "";
 }
 
-export function seedTrains(routes: PreparedRoute[], state: SimState): Train[] {
+/**
+ * 시뮬레이션 열차를 배치한다.
+ *
+ * timetable 을 넘기면 첫차 전·막차 후에는 그 노선 열차를 만들지 않는다.
+ * 시간표가 없는 노선(1~9호선 외)은 판단할 수 없어 종일 운행한다.
+ */
+export function seedTrains(
+  routes: PreparedRoute[],
+  state: SimState,
+  timetable?: Timetable | null,
+): Train[] {
   const trains: Train[] = [];
+  const clock = new Date(state.clockMs);
   const factor = hourFactor(state.clockMs);
   for (const route of routes) {
     if (state.hiddenLines.has(route.line)) continue;
+    if (timetable && !timetable.isInService(route.line, clock)) continue;
     const spacing = route.headway * 60 * CRUISE;
     let count = Math.max(2, Math.round((route.length / spacing) * factor));
     if (state.eco) count = Math.max(1, Math.round(count * 0.45));
