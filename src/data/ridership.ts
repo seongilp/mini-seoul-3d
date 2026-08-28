@@ -50,6 +50,11 @@ export class Ridership {
     return stationId in this.stations;
   }
 
+  /** 24시간 원본 배열. 그래프용. */
+  rawFlow(stationId: string): StationFlow | null {
+    return this.stations[stationId] ?? null;
+  }
+
   /**
    * 소수 시각(예: 8.5 = 8시 30분)의 승하차를 앞뒤 시간대에서 보간한다.
    * 시계가 흐를 때 기둥이 뚝뚝 끊기지 않고 자라내리게 하려는 것이다.

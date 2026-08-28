@@ -16,6 +16,8 @@ export type Train = {
   lastStop: number;
   coord: [number, number];
   heading: number;
+  /** 혼잡도(1 = 정원). 사람 보기 모드에서만 채워진다. */
+  congestion?: number;
 };
 
 export type PreparedRoute = Route & {
@@ -57,6 +59,12 @@ export function prepareRoutes(network: Network): PreparedRoute[] {
         headway: line.headway,
       };
     });
+}
+
+/** 행선지 표기. "성수" → "성수행", "내선순환" 처럼 이미 완성된 말은 그대로 둔다. */
+export function headsign(destination: string): string {
+  if (!destination) return "";
+  return /순환$/.test(destination) ? destination : `${destination}행`;
 }
 
 /** 진행 방향 끝의 역 이름. 순환선은 종착 개념이 없어 내선/외선으로 표기한다. */

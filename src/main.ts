@@ -1,10 +1,10 @@
 import "./style.css";
-import type { MapLayerMouseEvent } from "maplibre-gl";
 import { createMap, restyleBase, setUnderground, STYLES } from "./map/createMap";
 import { addTransitLayers } from "./map/layers";
 import { CrowdLayer } from "./map/crowd";
-import { addTrainLayers, updateTrains } from "./map/trains";
-import { prepareRoutes, seedTrains, stepFleet, type Train } from "./sim/fleet";
+import { addTrainLayers, TRAIN_HIT_LAYER, updateTrains } from "./map/trains";
+import { Congestion, congestionLabel } from "./sim/congestion";
+import { headsign, prepareRoutes, seedTrains, stepFleet, type Train } from "./sim/fleet";
 import type { Network, SimState } from "./types";
 import { loadRidership } from "./data/ridership";
 import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
@@ -49,6 +49,7 @@ const map = createMap(document.querySelector("#map") as HTMLElement, state.night
 
 const hud = mountHud(hudRoot, network, state, {
   onSearch(station) {
+    stopFollow();
     hud.showStation(station);
     map.flyTo({
       center: [station.lng, station.lat],
@@ -91,14 +92,32 @@ const hud = mountHud(hudRoot, network, state, {
     map.setStyle(state.night ? STYLES.night : STYLES.day);
   },
   onLayers() {},
+  onScrub(hour) {
+    // 슬라이더로 옮긴 시각을 시뮬레이션 시계에 반영한다.
+    const d = new Date(state.clockMs);
+    d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+    state.clockMs = d.getTime();
+    const at = currentHour();
+    if (state.crowd && crowd) {
+      crowd.update(map, at);
+      hud.updateCrowdNote(at);
+    }
+    hud.setFlowHour(at);
+  },
   onCrowd() {
     state.crowd = !state.crowd;
     crowd?.setVisible(map, state.crowd);
-    if (state.crowd) crowd?.update(map, currentHour());
+    if (state.crowd) {
+      crowd?.update(map, currentHour());
+      applyCongestion(trains, currentHour());
+    } else {
+      clearCongestion(trains);
+    }
     hud.setCrowd(state.crowd);
   },
   onLive() {
     state.live = !state.live;
+    hud.setScrubEnabled(!state.live, state.live ? "실시간" : "시각을 끌어 보세요");
     if (state.live) {
       state.speed = 1; // 실시간에서는 배속이 의미가 없다.
       liveTrains.start();
@@ -112,18 +131,6 @@ const hud = mountHud(hudRoot, network, state, {
 
 /** ?debug 를 붙이면 배치 실패·노선 지연 같은 진단 정보를 상태줄에 표시한다. */
 const DEBUG = new URLSearchParams(location.search).has("debug");
-if (DEBUG) {
-  // 콘솔에서 지도와 시계를 들여다보고 조작할 수 있게 한다.
-  Object.assign(window as unknown as Record<string, unknown>, {
-    __map: map,
-    /** 시뮬레이션 시계를 그날 특정 시각으로 옮긴다. 승하차 레이어 확인용. */
-    __setHour(hour: number) {
-      const d = new Date(state.clockMs);
-      d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
-      state.clockMs = d.getTime();
-    },
-  });
-}
 
 function describeLive(status: LiveStatus): string {
   switch (status.kind) {
@@ -197,6 +204,8 @@ document.addEventListener("visibilitychange", () => {
 });
 window.visualViewport?.addEventListener("resize", syncMapSize);
 
+hud.setScrubEnabled(true, "시각을 끌어 보세요");
+
 function hideLoader() {
   if (!loader.isConnected) return;
   loader.classList.add("is-gone");
@@ -237,6 +246,7 @@ function paintOverlay() {
  * 그 값 대신 paintOverlay 가 세우는 플래그를 본다.
  */
 let crowd: CrowdLayer | null = null;
+let congestion: Congestion | null = null;
 let styleReady = false;
 
 function attachCrowd() {
@@ -254,12 +264,34 @@ function currentHour(): number {
   return t.hour + t.minute / 60;
 }
 
-void loadRidership().then((loaded) => {
-  if (!loaded) return;
-  crowd = new CrowdLayer(loaded, network.stations);
-  hud.setRidership(loaded);
-  attachCrowd();
-});
+void loadRidership()
+  .then((loaded) => {
+    if (!loaded) return;
+    crowd = new CrowdLayer(loaded, network.stations);
+    congestion = new Congestion(routes, network.stations, loaded);
+    hud.setRidership(loaded);
+    attachCrowd();
+  })
+  .catch((error) => {
+    // 여기서 던지면 사람 보기 기능만 빠지고 나머지는 계속 돌아야 한다.
+    console.error("ridership setup failed", error);
+  });
+
+/**
+ * 사람 보기 모드에서 열차마다 혼잡도를 매긴다.
+ * 이 값이 있으면 열차 박스가 노선 색 대신 혼잡도 색으로 칠해진다.
+ */
+function applyCongestion(list: Train[], hour: number) {
+  if (!congestion) return;
+  for (const train of list) {
+    const ratio = congestion.ratioAt(train.routeId, train.dir, hour, train.along);
+    train.congestion = ratio ?? undefined;
+  }
+}
+
+function clearCongestion(list: Train[]) {
+  for (const train of list) train.congestion = undefined;
+}
 
 /**
  * 시간표는 없어도 앱이 동작하므로 시작을 막지 않는다. 도착하면 HUD 에 넘기고
@@ -279,18 +311,61 @@ map.on("load", hideLoader);
 map.once("idle", hideLoader);
 setTimeout(hideLoader, 2500);
 
-map.on("click", "metro-station-ring", (e: MapLayerMouseEvent) => {
-  const id = e.features?.[0]?.properties?.id as string | undefined;
-  const station = network.stations.find((s) => s.id === id);
-  if (station) {
-    hud.showStation(station);
-    map.easeTo({ center: [station.lng, station.lat], duration: 400 });
+/** 따라가는 중인 열차 id. null 이면 카메라는 자유롭다. */
+let followId: string | null = null;
+
+function stopFollow() {
+  if (followId === null) return;
+  followId = null;
+  hud.setFollow(null);
+}
+
+/**
+ * 클릭 처리는 한 곳에서 한다. 레이어별 핸들러를 따로 달면 열차와 역이 겹칠 때
+ * 둘 다 발화해서 열차를 눌렀는데 역 팝업까지 열린다.
+ */
+map.on("click", (e) => {
+  const layers = [TRAIN_HIT_LAYER, "metro-station-ring"].filter((id) => map.getLayer(id));
+  const hits = map.queryRenderedFeatures(e.point, { layers });
+
+  const train = hits.find((f) => f.layer.id === TRAIN_HIT_LAYER);
+  if (train) {
+    const id = train.properties?.id as string | undefined;
+    if (id) {
+      hud.hideStation();
+      followId = id;
+      map.easeTo({ center: e.lngLat, zoom: Math.max(map.getZoom(), 14.2), duration: 600 });
+      return;
+    }
   }
+
+  const ring = hits.find((f) => f.layer.id === "metro-station-ring");
+  if (ring) {
+    const id = ring.properties?.id as string | undefined;
+    const station = network.stations.find((s) => s.id === id);
+    if (station) {
+      stopFollow();
+      hud.showStation(station);
+      map.easeTo({ center: [station.lng, station.lat], duration: 400 });
+      return;
+    }
+  }
+
+  hud.hideStation();
+  stopFollow();
 });
 
-map.on("click", (e) => {
-  const hit = map.queryRenderedFeatures(e.point, { layers: ["metro-station-ring"] });
-  if (!hit.length) hud.hideStation();
+map.on("mouseenter", TRAIN_HIT_LAYER, () => {
+  map.getCanvas().style.cursor = "pointer";
+});
+map.on("mouseleave", TRAIN_HIT_LAYER, () => {
+  map.getCanvas().style.cursor = "";
+});
+
+// 지도를 직접 끌면 따라가기를 놓아 준다.
+map.on("dragstart", stopFollow);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") stopFollow();
 });
 
 map.on("mouseenter", "metro-station-ring", () => {
@@ -346,17 +421,64 @@ function frame(now: number) {
       stepFleet(trains, routes, state, pendingDt);
     }
     pendingDt = 0;
+    // 실시간 모드는 매 프레임 열차 객체를 새로 만들어서, 그리기 직전에 다시 매겨야 한다.
+    if (state.crowd) applyCongestion(trains, currentHour());
     if (map.isStyleLoaded()) updateTrains(map, trains);
   }
 
-  if (state.crowd && crowd && now - crowdUpdatedAt > CROWD_INTERVAL_MS) {
+  // 역 기둥과 팝업 그래프는 매 프레임 다시 만들 만큼 가볍지 않다.
+  if (now - crowdUpdatedAt > CROWD_INTERVAL_MS) {
     crowdUpdatedAt = now;
     const hour = currentHour();
-    crowd.update(map, hour);
-    hud.updateCrowdNote(hour);
+    if (state.crowd && crowd) {
+      crowd.update(map, hour);
+      hud.updateCrowdNote(hour);
+    }
+    hud.setFlowHour(hour);
   }
+  if (followId !== null) {
+    const target = trains.find((t) => t.id === followId);
+    if (target) {
+      // easeTo 는 매 프레임 부르면 서로 밀어내므로 중심만 즉시 옮긴다.
+      map.jumpTo({ center: target.coord });
+      hud.setFollow({
+        line: network.lines.find((l) => l.id === target.line)?.name ?? target.line,
+        color: target.color,
+        destination: headsign(target.destination),
+        congestion:
+          target.congestion === undefined ? null : congestionLabel(target.congestion),
+      });
+    } else {
+      // 실시간 갱신에서 사라진 열차(회차·종료)는 놓아 준다.
+      stopFollow();
+    }
+  }
+
   hud.tick(state.live ? new Date() : new Date(state.clockMs), trains.length);
   requestAnimationFrame(frame);
 }
 
 requestAnimationFrame(frame);
+
+if (DEBUG) {
+  /**
+   * 콘솔에서 지도와 시계를 들여다보고 조작할 수 있게 한다.
+   *
+   * Object.assign 은 getter 를 그 자리에서 평가해 값만 복사한다. 아래 변수들이
+   * 아직 초기화되기 전이면 그대로 던지므로 defineProperties 로 진짜 getter 를 건다.
+   * 이 블록이 파일 끝에 있는 것도 같은 이유다.
+   */
+  Object.defineProperties(window, {
+    __map: { get: () => map },
+    __trains: { get: () => trains },
+    __congestion: { get: () => congestion },
+    __crowd: { get: () => crowd },
+    __setHour: {
+      value: (hour: number) => {
+        const d = new Date(state.clockMs);
+        d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+        state.clockMs = d.getTime();
+      },
+    },
+  });
+}

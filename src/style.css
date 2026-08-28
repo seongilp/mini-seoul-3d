@@ -464,3 +464,209 @@ body {
   border-color: rgba(111, 182, 232, 0.55);
   background: rgba(111, 182, 232, 0.16);
 }
+
+.timebar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 220px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.timebar-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  flex: none;
+  min-width: 44px;
+}
+
+.timebar-hint {
+  font-size: 10.5px;
+  color: var(--muted);
+  flex: none;
+  white-space: nowrap;
+}
+
+.timebar.is-locked {
+  opacity: 0.55;
+}
+
+#timebar-range {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  /* 새벽·낮·밤을 옅게 구분해 하루의 위치를 가늠하게 한다. */
+  background: linear-gradient(
+    90deg,
+    rgba(255, 244, 220, 0.14) 0%,
+    rgba(255, 244, 220, 0.14) 21%,
+    rgba(255, 244, 220, 0.36) 29%,
+    rgba(255, 244, 220, 0.36) 79%,
+    rgba(255, 244, 220, 0.14) 87%,
+    rgba(255, 244, 220, 0.14) 100%
+  );
+  outline: none;
+}
+
+#timebar-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--text);
+  border: 2px solid rgba(28, 26, 23, 0.85);
+  cursor: grab;
+}
+
+#timebar-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--text);
+  border: 2px solid rgba(28, 26, 23, 0.85);
+  cursor: grab;
+}
+
+#timebar-range:disabled::-webkit-slider-thumb {
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .timebar {
+    width: calc(100vw - 32px);
+    bottom: 54px;
+  }
+
+  .timebar-hint {
+    display: none;
+  }
+}
+
+.flow {
+  margin-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.flow[hidden] {
+  display: none;
+}
+
+.flow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.flow-hour {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.flow-nums {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+.flow-nums b {
+  font-weight: 600;
+}
+
+.flow-nums .is-off {
+  color: #6fb6e8;
+}
+
+.flow-nums .is-on {
+  color: #ff9a5c;
+}
+
+.flow .chart {
+  display: block;
+}
+
+.flow-foot {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.follow {
+  position: absolute;
+  left: 50%;
+  /* 검색창이 상단 중앙을 쓰므로 그 아래로 내린다. */
+  top: 62px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.follow[hidden] {
+  display: none;
+}
+
+.follow-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.follow-line {
+  font-weight: 600;
+}
+
+.follow-dest {
+  color: var(--text);
+}
+
+.follow-cong {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(246, 240, 228, 0.16);
+}
+
+.follow-cong[hidden] {
+  display: none;
+}
+
+.follow-hint {
+  font-size: 10px;
+  color: var(--muted);
+  border-left: 1px solid var(--panel-border);
+  padding-left: 8px;
+}
+
+@media (max-width: 640px) {
+  .follow-hint {
+    display: none;
+  }
+}

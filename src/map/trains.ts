@@ -5,7 +5,8 @@ import type {
   Map as MapLibreMap,
 } from "maplibre-gl";
 import * as THREE from "three";
-import type { Train } from "../sim/fleet";
+import { congestionColor } from "../sim/congestion";
+import { headsign, type Train } from "../sim/fleet";
 
 const ORIGIN: [number, number] = [126.9784, 37.5665];
 const BOX_LEN = 10;
@@ -13,6 +14,7 @@ const MAX = 512;
 const LAYER_ID = "metro-trains-3d";
 const LABEL_SOURCE = "metro-train-labels";
 const LABEL_LAYER = "metro-train-label";
+export const TRAIN_HIT_LAYER = "metro-train-hit";
 /** 이 줌 아래에서는 라벨이 서로 겹쳐 읽기 어렵다. */
 const LABEL_MIN_ZOOM = 12.8;
 /**
@@ -138,7 +140,10 @@ class TrainLayer implements CustomLayerInterface {
       this.dummy.scale.setScalar(s);
       this.dummy.updateMatrix();
       this.boxes.setMatrixAt(n, this.dummy.matrix);
-      this.color.set(train.color);
+      // 혼잡도가 계산돼 있으면 노선 색 대신 혼잡도 색으로 칠한다.
+      this.color.set(
+        train.congestion === undefined ? train.color : congestionColor(train.congestion),
+      );
       this.boxes.setColorAt(n, this.color);
       n++;
     }
@@ -155,13 +160,15 @@ let layer: TrainLayer | null = null;
 function labelData(trains: Train[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: trains
-      .filter((t) => t.destination)
-      .map((t) => ({
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: t.coord },
-        properties: { label: `${t.destination}행`, color: t.color },
-      })),
+    features: trains.map((t) => ({
+      type: "Feature" as const,
+      geometry: { type: "Point" as const, coordinates: t.coord },
+      properties: {
+        id: t.id,
+        label: headsign(t.destination),
+        color: t.color,
+      },
+    })),
   };
 }
 
@@ -172,6 +179,18 @@ function addLabelLayer(map: MapLibreMap): void {
   map.addSource(LABEL_SOURCE, {
     type: "geojson",
     data: { type: "FeatureCollection", features: [] },
+  });
+
+  // 열차를 클릭할 수 있게 하는 투명 원. 3D 박스는 커스텀 레이어라 직접 집을 수 없다.
+  map.addLayer({
+    id: TRAIN_HIT_LAYER,
+    type: "circle",
+    source: LABEL_SOURCE,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 6, 16, 14],
+      "circle-color": "#000000",
+      "circle-opacity": 0,
+    },
   });
 
   map.addLayer({
@@ -199,7 +218,7 @@ function addLabelLayer(map: MapLibreMap): void {
 }
 
 export function addTrainLayers(map: MapLibreMap, trains: Train[]): void {
-  for (const id of [LAYER_ID, "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
+  for (const id of [LAYER_ID, TRAIN_HIT_LAYER, "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
     if (map.getLayer(id)) map.removeLayer(id);
   }
   if (map.getSource("metro-trains")) map.removeSource("metro-trains");
@@ -213,7 +232,6 @@ export function addTrainLayers(map: MapLibreMap, trains: Train[]): void {
 }
 
 let lastLabelAt = 0;
-let labelsCleared = true;
 
 export function updateTrains(map: MapLibreMap, trains: Train[]): void {
   if (!layer || !map.getLayer(LAYER_ID)) return;
@@ -226,17 +244,9 @@ function syncLabels(map: MapLibreMap, trains: Train[]): void {
   const source = map.getSource(LABEL_SOURCE) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
 
-  if (map.getZoom() < LABEL_MIN_ZOOM) {
-    if (!labelsCleared) {
-      source.setData({ type: "FeatureCollection", features: [] });
-      labelsCleared = true;
-    }
-    return;
-  }
-
+  // 줌이 낮아도 소스는 채워 둔다. 글자만 감출 뿐 클릭 판정은 살아 있어야 한다.
   const now = performance.now();
   if (now - lastLabelAt < LABEL_INTERVAL_MS) return;
   lastLabelAt = now;
-  labelsCleared = false;
   source.setData(labelData(trains));
 }

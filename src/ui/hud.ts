@@ -1,7 +1,16 @@
 import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
 import type { Ridership } from "../data/ridership";
+import { renderStationChart } from "./sparkline";
 import { displayTime, type Timetable } from "../data/timetable";
 import type { Network, SimState, Station } from "../types";
+
+/** 따라가기 중인 열차 표시에 필요한 정보. */
+export type FollowInfo = {
+  line: string;
+  color: string;
+  destination: string;
+  congestion: string | null;
+};
 
 export type HudHandlers = {
   onSearch: (station: Station) => void;
@@ -16,7 +25,15 @@ export type HudHandlers = {
   onLayers: () => void;
   onLive: () => void;
   onCrowd: () => void;
+  /** 시간 슬라이더를 끌었을 때. hour 는 0~24 소수. */
+  onScrub: (hour: number) => void;
 };
+
+/** 자정 기준 분 → "08:35". */
+function formatMinutes(minutes: number): string {
+  const m = Math.round(minutes) % (24 * 60);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
 
 export function mountHud(root: HTMLElement, network: Network, state: SimState, handlers: HudHandlers) {
   root.innerHTML = `
@@ -47,6 +64,13 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     </div>
     <aside class="legend" id="legend" hidden></aside>
     <article class="popup" id="popup" hidden></article>
+    <div class="follow" id="follow" hidden></div>
+    <div class="timebar" id="timebar">
+      <span class="timebar-label" id="timebar-label">--:--</span>
+      <input id="timebar-range" type="range" min="0" max="1439" step="1" value="0"
+             aria-label="시각" />
+      <span class="timebar-hint" id="timebar-hint"></span>
+    </div>
     <div class="status" id="status"></div>
   `;
 
@@ -62,6 +86,11 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const night = root.querySelector("#btn-night") as HTMLButtonElement;
   const live = root.querySelector("#btn-live") as HTMLButtonElement;
   const crowdBtn = root.querySelector("#btn-crowd") as HTMLButtonElement;
+  const follow = root.querySelector("#follow") as HTMLElement;
+  const timebar = root.querySelector("#timebar") as HTMLElement;
+  const timeRange = root.querySelector("#timebar-range") as HTMLInputElement;
+  const timeLabel = root.querySelector("#timebar-label") as HTMLElement;
+  const timeHint = root.querySelector("#timebar-hint") as HTMLElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -122,6 +151,25 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   night.addEventListener("click", handlers.onNight);
   live.addEventListener("click", handlers.onLive);
   crowdBtn.addEventListener("click", handlers.onCrowd);
+
+  /** 끄는 동안에는 시계가 슬라이더를 덮어쓰지 않게 한다. */
+  let scrubbing = false;
+  const endScrub = () => {
+    scrubbing = false;
+  };
+  timeRange.addEventListener("pointerdown", () => {
+    scrubbing = true;
+  });
+  timeRange.addEventListener("pointerup", endScrub);
+  timeRange.addEventListener("pointercancel", endScrub);
+  timeRange.addEventListener("blur", endScrub);
+  timeRange.addEventListener("input", () => {
+    scrubbing = true;
+    const minutes = Number(timeRange.value);
+    timeLabel.textContent = formatMinutes(minutes);
+    handlers.onScrub(minutes / 60);
+  });
+  timeRange.addEventListener("change", endScrub);
   root.querySelector("#btn-layers")!.addEventListener("click", () => {
     legend.hidden = !legend.hidden;
     handlers.onLayers();
@@ -149,7 +197,11 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let lastNight: string | null = null;
   let liveNote = "";
   let crowdNote = "";
+  let lastTimeValue = -1;
+  let lastFollowKey = "";
   let crowdBucket = -1;
+  /** 팝업 그래프가 가리키는 시각. 시계·슬라이더를 따라 움직인다. */
+  let flowHour = 0;
   let arrivalsAbort: AbortController | null = null;
   let timetable: Timetable | null = null;
   let ridership: Ridership | null = null;
@@ -211,6 +263,34 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         host.appendChild(row);
       }
     }
+  };
+
+  /**
+   * 시간대별 승하차. 현재 시각 수치를 위에 적고 하루 곡선을 아래에 그린다.
+   * 하루 전체가 보여야 지금이 붐비는 때인지 아닌지 알 수 있다.
+   */
+  const renderFlow = (station: Station) => {
+    const host = popup.querySelector("#flow") as HTMLElement | null;
+    if (!host) return;
+    const flow = ridership?.rawFlow(station.id);
+    const sample = ridership?.sampleAt(station.id, flowHour);
+    if (!flow || !sample) {
+      host.hidden = true;
+      return;
+    }
+
+    const n = (v: number) => Math.round(v).toLocaleString("ko-KR");
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="flow-head">
+        <span class="flow-hour">${String(Math.floor(flowHour)).padStart(2, "0")}시</span>
+        <span class="flow-nums">
+          <b class="is-off">하차 ${n(sample.off)}</b><b class="is-on">승차 ${n(sample.on)}</b>
+        </span>
+      </div>
+      ${renderStationChart(flow, flowHour)}
+      <div class="flow-foot">시간대별 일평균 · ${ridership?.month.slice(0, 4)}년 ${Number(ridership?.month.slice(4))}월</div>
+    `;
   };
 
   /** 첫차·막차. 서울교통공사 1~9호선만 데이터가 있다. */
@@ -280,6 +360,15 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
 
   return {
     tick(now: Date, trainCount: number) {
+      // 끄는 중에는 사용자의 손이 우선이다.
+      if (!scrubbing) {
+        const minutes = now.getHours() * 60 + now.getMinutes();
+        if (minutes !== lastTimeValue) {
+          lastTimeValue = minutes;
+          timeRange.value = String(minutes);
+          timeLabel.textContent = formatMinutes(minutes);
+        }
+      }
       const sec = Math.floor(now.getTime() / 1000);
       if (sec !== lastClockSec) {
         lastClockSec = sec;
@@ -321,6 +410,13 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     renderLegend,
     setRidership(next: Ridership | null) {
       ridership = next;
+      if (shownStation && !popup.hidden) renderFlow(shownStation);
+    },
+    /** 시각이 바뀌면 열려 있는 팝업의 그래프도 따라 움직인다. */
+    setFlowHour(hour: number) {
+      if (Math.floor(hour * 4) === Math.floor(flowHour * 4)) return;
+      flowHour = hour;
+      if (shownStation && !popup.hidden) renderFlow(shownStation);
     },
     setCrowd(on: boolean) {
       crowdOn = on;
@@ -337,6 +433,41 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       const { on, off } = ridership.cityTotalAt(hour);
       const k = (v: number) => `${Math.round(v / 1000).toLocaleString()}천`;
       crowdNote = `${String(Math.floor(hour)).padStart(2, "0")}시 승차 ${k(on)} · 하차 ${k(off)}`;
+    },
+    /** 실시간 모드에서는 시각을 임의로 옮길 수 없다. */
+    setScrubEnabled(enabled: boolean, hint: string) {
+      timeRange.disabled = !enabled;
+      timebar.classList.toggle("is-locked", !enabled);
+      timeHint.textContent = hint;
+    },
+    /**
+     * 따라가는 열차 정보. null 이면 표시를 감춘다.
+     * 열차는 계속 움직이므로 매 프레임 불린다. 내용이 같으면 DOM 을 건드리지 않는다.
+     */
+    setFollow(info: FollowInfo | null) {
+      if (!info) {
+        if (!follow.hidden) follow.hidden = true;
+        lastFollowKey = "";
+        return;
+      }
+      const key = `${info.line}|${info.destination}|${info.congestion ?? ""}`;
+      follow.hidden = false;
+      if (key === lastFollowKey) return;
+      lastFollowKey = key;
+
+      follow.innerHTML = `
+        <span class="follow-dot"></span>
+        <span class="follow-line"></span>
+        <span class="follow-dest"></span>
+        <span class="follow-cong"></span>
+        <span class="follow-hint">Esc 로 해제</span>
+      `;
+      (follow.querySelector(".follow-dot") as HTMLElement).style.background = info.color;
+      follow.querySelector(".follow-line")!.textContent = info.line;
+      follow.querySelector(".follow-dest")!.textContent = info.destination;
+      const cong = follow.querySelector(".follow-cong") as HTMLElement;
+      cong.textContent = info.congestion ?? "";
+      cong.hidden = !info.congestion;
     },
     setLive(on: boolean, note: string) {
       live.setAttribute("aria-pressed", String(on));
@@ -356,6 +487,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         <div class="en"></div>
         <div class="chips">${chips}</div>
         <div class="arrivals" id="arrivals"><div class="arrivals-loading">도착정보 불러오는 중…</div></div>
+        <div class="flow" id="flow" hidden></div>
         <div class="timetable" id="timetable" hidden></div>
       `;
       // 역명은 외부 데이터라 textContent 로 넣는다.
@@ -363,6 +495,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       popup.querySelector(".en")!.textContent = station.nameEn;
       shownStation = station;
       loadArrivals(station);
+      renderFlow(station);
       renderTimetable(station);
     },
     hideStation() {
