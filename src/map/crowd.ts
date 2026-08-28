@@ -82,7 +82,24 @@ export class CrowdLayer {
         type: "fill-extrusion",
         source: SOURCE_ID,
         paint: {
-          "fill-extrusion-height": ["get", "height"],
+          // 도시 전체를 볼 때 기준으로 높이를 잡았기에, 가까이 가면 낮춰서
+          // 건물과 지도를 가리지 않게 한다.
+          //
+          // zoom 은 최상위 interpolate 의 입력으로만 쓸 수 있어서, 배율을 곱하는
+          // 식을 각 정지점 안에 넣는다. 바깥에서 곱하면 레이어가 거부된다.
+          "fill-extrusion-height": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11,
+            ["*", ["get", "height"], 1],
+            13.5,
+            ["*", ["get", "height"], 0.8],
+            15,
+            ["*", ["get", "height"], 0.45],
+            17.4,
+            ["*", ["get", "height"], 0.28],
+          ],
           "fill-extrusion-base": 0,
           "fill-extrusion-color": [
             "interpolate",
@@ -90,7 +107,15 @@ export class CrowdLayer {
             ["get", "net"],
             ...COLOR_RAMP.flat(),
           ],
-          "fill-extrusion-opacity": 0.82,
+          "fill-extrusion-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            13,
+            0.82,
+            16,
+            0.62,
+          ],
         },
       },
       beforeId && map.getLayer(beforeId) ? beforeId : undefined,
