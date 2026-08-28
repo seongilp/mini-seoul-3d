@@ -2,10 +2,12 @@ import "./style.css";
 import type { MapLayerMouseEvent } from "maplibre-gl";
 import { createMap, restyleBase, setUnderground, STYLES } from "./map/createMap";
 import { addTransitLayers } from "./map/layers";
+import { CrowdLayer } from "./map/crowd";
 import { addTrainLayers, updateTrains } from "./map/trains";
 import { prepareRoutes, seedTrains, stepFleet, type Train } from "./sim/fleet";
 import type { Network, SimState } from "./types";
-import { loadTimetable, type Timetable } from "./data/timetable";
+import { loadRidership } from "./data/ridership";
+import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
 import { createLiveController, type LiveStatus } from "./live/controller";
 import { LiveFleet } from "./live/interpolate";
 import { LIVE_LINES, type LiveLine } from "./live/lines";
@@ -19,6 +21,7 @@ const state: SimState = {
   underground: false,
   night: false,
   live: false,
+  crowd: false,
   hiddenLines: new Set(),
 };
 
@@ -88,6 +91,12 @@ const hud = mountHud(hudRoot, network, state, {
     map.setStyle(state.night ? STYLES.night : STYLES.day);
   },
   onLayers() {},
+  onCrowd() {
+    state.crowd = !state.crowd;
+    crowd?.setVisible(map, state.crowd);
+    if (state.crowd) crowd?.update(map, currentHour());
+    hud.setCrowd(state.crowd);
+  },
   onLive() {
     state.live = !state.live;
     if (state.live) {
@@ -103,6 +112,18 @@ const hud = mountHud(hudRoot, network, state, {
 
 /** ?debug 를 붙이면 배치 실패·노선 지연 같은 진단 정보를 상태줄에 표시한다. */
 const DEBUG = new URLSearchParams(location.search).has("debug");
+if (DEBUG) {
+  // 콘솔에서 지도와 시계를 들여다보고 조작할 수 있게 한다.
+  Object.assign(window as unknown as Record<string, unknown>, {
+    __map: map,
+    /** 시뮬레이션 시계를 그날 특정 시각으로 옮긴다. 승하차 레이어 확인용. */
+    __setHour(hour: number) {
+      const d = new Date(state.clockMs);
+      d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+      state.clockMs = d.getTime();
+    },
+  });
+}
 
 function describeLive(status: LiveStatus): string {
   switch (status.kind) {
@@ -202,7 +223,43 @@ function paintOverlay() {
   } catch (error) {
     console.error("trains failed", error);
   }
+  styleReady = true;
+  try {
+    attachCrowd();
+  } catch (error) {
+    console.error("crowd failed", error);
+  }
 }
+
+/**
+ * 승하차 기둥. 데이터가 늦게 와도, 스타일이 다시 로드돼도 붙일 수 있어야 한다.
+ * style.load 핸들러 안에서는 map.isStyleLoaded() 가 아직 false 라서
+ * 그 값 대신 paintOverlay 가 세우는 플래그를 본다.
+ */
+let crowd: CrowdLayer | null = null;
+let styleReady = false;
+
+function attachCrowd() {
+  if (!crowd || !styleReady) return;
+  // 열차 레이어보다 아래에 둬야 기둥이 열차를 가리지 않는다.
+  crowd.attach(map, "metro-trains-3d");
+  crowd.setVisible(map, state.crowd);
+  crowd.update(map, currentHour());
+}
+
+/** 지금 화면이 나타내는 시각을 0~24 소수로. */
+function currentHour(): number {
+  const at = state.live ? new Date() : new Date(state.clockMs);
+  const t = seoulTime(at);
+  return t.hour + t.minute / 60;
+}
+
+void loadRidership().then((loaded) => {
+  if (!loaded) return;
+  crowd = new CrowdLayer(loaded, network.stations);
+  hud.setRidership(loaded);
+  attachCrowd();
+});
 
 /**
  * 시간표는 없어도 앱이 동작하므로 시작을 막지 않는다. 도착하면 HUD 에 넘기고
@@ -260,6 +317,10 @@ let signatureCheckedAt = 0;
 /** 경계 판정은 분 단위라 자주 볼 필요가 없다. */
 const SIGNATURE_INTERVAL_MS = 1000;
 
+/** 기둥 갱신 주기(ms). setData 는 워커 파싱이 있어 매 프레임 부를 수 없다. */
+const CROWD_INTERVAL_MS = 250;
+let crowdUpdatedAt = 0;
+
 let frameNo = 0;
 let pendingDt = 0;
 function frame(now: number) {
@@ -286,6 +347,13 @@ function frame(now: number) {
     }
     pendingDt = 0;
     if (map.isStyleLoaded()) updateTrains(map, trains);
+  }
+
+  if (state.crowd && crowd && now - crowdUpdatedAt > CROWD_INTERVAL_MS) {
+    crowdUpdatedAt = now;
+    const hour = currentHour();
+    crowd.update(map, hour);
+    hud.updateCrowdNote(hour);
   }
   hud.tick(state.live ? new Date() : new Date(state.clockMs), trains.length);
   requestAnimationFrame(frame);

@@ -46,5 +46,7 @@ export type SimState = {
   underground: boolean;
   night: boolean;
   live: boolean;
+  /** 승하차 인원 3D 기둥 레이어. */
+  crowd: boolean;
   hiddenLines: Set<string>;
 };

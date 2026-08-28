@@ -458,3 +458,9 @@ body {
   margin-left: auto;
   flex: none;
 }
+
+.toolbar button.is-crowd {
+  color: #6fb6e8;
+  border-color: rgba(111, 182, 232, 0.55);
+  background: rgba(111, 182, 232, 0.16);
+}

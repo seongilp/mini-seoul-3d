@@ -1,4 +1,5 @@
 import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
+import type { Ridership } from "../data/ridership";
 import { displayTime, type Timetable } from "../data/timetable";
 import type { Network, SimState, Station } from "../types";
 
@@ -14,6 +15,7 @@ export type HudHandlers = {
   onNight: () => void;
   onLayers: () => void;
   onLive: () => void;
+  onCrowd: () => void;
 };
 
 export function mountHud(root: HTMLElement, network: Network, state: SimState, handlers: HudHandlers) {
@@ -34,6 +36,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       <button id="btn-play" title="재생 속도">×1</button>
       <button id="btn-eco" title="에코">ECO</button>
       <button id="btn-live" title="실시간 운행 (서울 열린데이터광장)">LIVE</button>
+      <button id="btn-crowd" title="시간대별 승하차 인원">人</button>
       <button id="btn-layers" title="노선">≡</button>
       <button id="btn-full" title="전체화면">⛶</button>
     </div>
@@ -58,6 +61,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const under = root.querySelector("#btn-under") as HTMLButtonElement;
   const night = root.querySelector("#btn-night") as HTMLButtonElement;
   const live = root.querySelector("#btn-live") as HTMLButtonElement;
+  const crowdBtn = root.querySelector("#btn-crowd") as HTMLButtonElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -117,6 +121,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   eco.addEventListener("click", handlers.onEco);
   night.addEventListener("click", handlers.onNight);
   live.addEventListener("click", handlers.onLive);
+  crowdBtn.addEventListener("click", handlers.onCrowd);
   root.querySelector("#btn-layers")!.addEventListener("click", () => {
     legend.hidden = !legend.hidden;
     handlers.onLayers();
@@ -143,8 +148,12 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let lastClockSec = -1;
   let lastNight: string | null = null;
   let liveNote = "";
+  let crowdNote = "";
+  let crowdBucket = -1;
   let arrivalsAbort: AbortController | null = null;
   let timetable: Timetable | null = null;
+  let ridership: Ridership | null = null;
+  let crowdOn = false;
   let shownStation: Station | null = null;
 
   const colorOf = (lineId: string | null) =>
@@ -279,9 +288,10 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
           clock.textContent = c;
           lastClockText = c;
         }
-        const s = liveNote
-          ? `${trainCount} trains  ·  ${network.stations.length} stations  ·  ${liveNote}`
-          : `${trainCount} trains  ·  ${network.stations.length} stations`;
+        const parts = [`${trainCount} trains`, `${network.stations.length} stations`];
+        if (crowdOn && crowdNote) parts.push(crowdNote);
+        if (liveNote) parts.push(liveNote);
+        const s = parts.join("  ·  ");
         if (s !== lastStatusText) {
           status.textContent = s;
           lastStatusText = s;
@@ -309,6 +319,25 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       }
     },
     renderLegend,
+    setRidership(next: Ridership | null) {
+      ridership = next;
+    },
+    setCrowd(on: boolean) {
+      crowdOn = on;
+      crowdBtn.setAttribute("aria-pressed", String(on));
+      crowdBtn.classList.toggle("is-crowd", on);
+      if (!on) crowdNote = "";
+    },
+    /** 승하차 요약. 시각이 바뀔 때만 다시 계산한다(전 역 합계라 가볍지 않다). */
+    updateCrowdNote(hour: number) {
+      if (!crowdOn || !ridership) return;
+      const bucket = Math.floor(hour * 4);
+      if (bucket === crowdBucket) return;
+      crowdBucket = bucket;
+      const { on, off } = ridership.cityTotalAt(hour);
+      const k = (v: number) => `${Math.round(v / 1000).toLocaleString()}천`;
+      crowdNote = `${String(Math.floor(hour)).padStart(2, "0")}시 승차 ${k(on)} · 하차 ${k(off)}`;
+    },
     setLive(on: boolean, note: string) {
       live.setAttribute("aria-pressed", String(on));
       live.classList.toggle("is-live", on);
