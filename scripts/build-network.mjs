@@ -326,19 +326,19 @@ for (const row of ordered.stationList) {
 }
 
 /**
- * 역번호가 크게 뛰어도 두 역이 붙어 있으면 같은 갈래로 본다.
+ * 역번호가 크게 뛰어도 엣지 자료가 이웃이라고 하면 같은 갈래로 본다.
  *
  * 단계별로 개통한 노선은 연장 구간에 다른 번호대를 받는다. 신분당선
- * 양재시민의숲(…689) → 청계산입구(…6810)가 6121 뛰지만 실제로는 2.9km 이웃이다.
- * 번호만 보고 자르면 이어진 노선이 화면에서 끊긴다.
+ * 양재시민의숲(…689) → 청계산입구(…6810)는 6121 뛰지만 2.9km 이웃이다.
+ * 반대로 경의중앙선은 효창공원앞이 목록 끝에 혼자 떨어져 신촌 앞에 오는데,
+ * 둘은 2.8km 로 가깝지만 실제로는 이어져 있지 않다. 거리만으로는 이 둘을
+ * 가릴 수 없어서 엣지 자료를 기준으로 삼는다.
  */
-const CONTINUOUS_M = 4200;
-
-function isContinuous(lineId, a, b) {
+function isLinkedByEdge(lineId, a, b) {
   const sa = lookup(nameIndex, `${lineId}:${a.STATN_NM}`) || lookup(nameIndex, a.STATN_NM);
   const sb = lookup(nameIndex, `${lineId}:${b.STATN_NM}`) || lookup(nameIndex, b.STATN_NM);
   if (!sa || !sb) return false;
-  return haversine([sa.lng, sa.lat], [sb.lng, sb.lat]) <= CONTINUOUS_M;
+  return Boolean(graphs.get(lineId)?.get(sa.id)?.has(sb.id));
 }
 
 function splitOrdered(lineId, rows) {
@@ -346,7 +346,7 @@ function splitOrdered(lineId, rows) {
   let current = [];
   let prev = null;
   for (const row of rows) {
-    if (prev !== null && row.STATN_ID - prev.STATN_ID > 80 && !isContinuous(lineId, prev, row)) {
+    if (prev !== null && row.STATN_ID - prev.STATN_ID > 80 && !isLinkedByEdge(lineId, prev, row)) {
       if (current.length) groups.push(current);
       current = [];
     }
@@ -395,24 +395,13 @@ function makeRoute(lineId, idx, chainStations, loop) {
   };
 }
 
-const routes = [];
-const usedLineIds = new Set();
-
-for (const [lineId, rows] of bySubway) {
-  const meta = LINE_META[lineId];
-  if (!meta) continue;
-  const groups = splitOrdered(lineId, rows);
-  groups.forEach((group, idx) => {
-    const found = stationsFromNames(lineId, group.map((r) => r.STATN_NM));
-    if (found.length < 2) return;
-    const loop = Boolean(meta.loop) && idx === 0 && found.length > 20;
-    routes.push(makeRoute(lineId, idx, found, loop));
-    usedLineIds.add(lineId);
-  });
-}
-
+/**
+ * 목록의 연속쌍도 그래프에 넣는다. 다만 역번호가 크게 뛰는 지점은 목록 순서를
+ * 믿을 수 없으므로 건너뛴다. 그 자리는 edges.min.json 이 채운다.
+ */
 for (const [lineId, names] of bySubway) {
   for (let i = 1; i < names.length; i++) {
+    if (names[i].STATN_ID - names[i - 1].STATN_ID > 80) continue;
     const a = lookup(nameIndex, `${lineId}:${names[i - 1].STATN_NM}`) || lookup(nameIndex, names[i - 1].STATN_NM);
     const b = lookup(nameIndex, `${lineId}:${names[i].STATN_NM}`) || lookup(nameIndex, names[i].STATN_NM);
     if (a && b) {
@@ -423,8 +412,46 @@ for (const [lineId, names] of bySubway) {
   }
 }
 
+const routes = [];
+const handledLines = new Set();
+
+for (const [lineId, rows] of bySubway) {
+  const meta = LINE_META[lineId];
+  if (!meta) continue;
+
+  const rawGroups = splitOrdered(lineId, rows).map((group) =>
+    stationsFromNames(lineId, group.map((r) => r.STATN_NM)),
+  );
+  const listGroups = rawGroups.filter((group) => group.length >= 2);
+
+  /*
+   * 목록 순서가 노선 형태를 담지 못하면 역이 버려진다. 경의중앙선은 효창공원앞이
+   * 목록 맨 뒤에 혼자 떨어져 있어 한 역짜리 조각이 되고, 그대로 사라져 용산 쪽과
+   * 공덕 쪽 사이가 화면에서 비었다. 그럴 때만 그래프를 따라 걸어 다시 세운다.
+   * 다만 그래프 순회가 조각을 더 잘게 쪼개면(1호선처럼 지선이 많은 경우)
+   * 그대로 두는 편이 낫다. 조각이 줄어들 때만 바꾼다.
+   */
+  const orphaned = rawGroups.length !== listGroups.length;
+  const graphChains = orphaned
+    ? walkChains(graphs.get(lineId) || new Map())
+        .map((chain) => chain.map((id) => byId.get(id)).filter(Boolean))
+        .filter((chain) => chain.length >= 2)
+    : [];
+
+  const chosen =
+    graphChains.length > 0 && graphChains.length <= listGroups.length
+      ? graphChains
+      : listGroups;
+
+  chosen.forEach((found, idx) => {
+    const loop = Boolean(meta.loop) && idx === 0 && found.length > 20;
+    routes.push(makeRoute(lineId, idx, found, loop));
+  });
+  handledLines.add(lineId);
+}
+
 for (const [lineId, adj] of graphs) {
-  if (usedLineIds.has(lineId)) continue;
+  if (handledLines.has(lineId)) continue;
   const meta = LINE_META[lineId];
   if (!meta) continue;
   walkChains(adj).forEach((chain, idx) => {
