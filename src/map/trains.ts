@@ -31,6 +31,8 @@ const CONSIST_ZOOM = 13.2;
 const MAX_CARS = 10;
 /** 인스턴스 상한. 열차 400대 × 10칸을 담고도 남는다. */
 const MAX_INSTANCES = 4600;
+/** 혼잡도를 어림할 자료가 없는 열차. 사람 보기 모드에서만 쓴다. */
+const UNKNOWN_CONGESTION_COLOR = "#6b6862";
 const LAYER_ID = "metro-trains-3d";
 const LABEL_SOURCE = "metro-train-labels";
 const LABEL_LAYER = "metro-train-label";
@@ -185,10 +187,14 @@ class TrainLayer implements CustomLayerInterface {
       const height = width * (CAR_HEIGHT / CAR_WIDTH);
 
       // 혼잡도 값은 늘 들어 있지만, 색으로 쓸지는 화면 모드가 정한다.
+      // 자료가 없어 값을 못 낸 열차를 노선 색으로 두면 혼잡도 색과 섞여
+      // 읽히므로 회색으로 빼 둔다.
       this.color.set(
-        colorByCongestion && train.congestion !== undefined
-          ? congestionColor(train.congestion)
-          : train.color,
+        !colorByCongestion
+          ? train.color
+          : train.congestion === undefined
+            ? UNKNOWN_CONGESTION_COLOR
+            : congestionColor(train.congestion),
       );
       const route = this.routes.get(train.routeId);
 

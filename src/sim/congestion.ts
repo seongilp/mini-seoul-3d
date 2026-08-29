@@ -31,6 +31,13 @@ export const MAX_RATIO = 1.6;
 export class Congestion {
   /** `${routeId}|${dir}|${hour}` → 구간별 열차 한 편당 인원. */
   private readonly profiles = new Map<string, Float32Array>();
+  /**
+   * routeId → 구간별로 추정을 받쳐 줄 자료가 있는지.
+   *
+   * 승하차 자료가 없는 구간에서는 누적이 그대로 흘러 0 이 나온다. 근거 없이
+   * "여유 0%" 라고 말하느니 값을 내지 않는 편이 낫다.
+   */
+  private readonly supported = new Map<string, Uint8Array>();
   private readonly routes = new Map<string, PreparedRoute>();
   /** 실측 자료. 있으면 추정보다 먼저 본다. */
   private measured: CongestionData | null = null;
@@ -44,6 +51,10 @@ export class Congestion {
       const perTrain = 60 / Math.max(1, route.headway) || 1;
       const trainsPerHour = perTrain;
 
+      for (const dir of [1, -1] as const) {
+        this.supported.set(`${route.id}|${dir}`, this.coverage(route, dir, ridership));
+      }
+
       for (let hour = 0; hour < 24; hour++) {
         for (const dir of [1, -1] as const) {
           const seg = this.build(route, hour, dir, ridership, lineCount, trainsPerHour);
@@ -51,6 +62,39 @@ export class Congestion {
         }
       }
     }
+  }
+
+  /**
+   * 구간마다 앞뒤로 승하차 자료가 있는지 표시한다.
+   * 앞쪽에 탄 사람 자료도, 뒤쪽에 내릴 사람 자료도 없으면 그 구간의 재차인원은
+   * 어림할 근거가 없다.
+   */
+  private coverage(route: PreparedRoute, dir: 1 | -1, ridership: Ridership): Uint8Array {
+    const stops = route.stations;
+    const n = stops.length;
+    const order = dir === 1 ? stops : [...stops].reverse();
+    const known = order.map((s) => (ridership.rawFlow(s.id) ? 1 : 0));
+
+    let before = 0;
+    const hasBefore = known.map((v) => {
+      const seen = before;
+      before += v;
+      return seen + v > 0 ? 1 : 0;
+    });
+
+    let after = 0;
+    const hasAfter = new Array<number>(n);
+    for (let k = n - 1; k >= 0; k--) {
+      hasAfter[k] = after > 0 ? 1 : 0;
+      after += known[k];
+    }
+
+    const out = new Uint8Array(n);
+    for (let k = 0; k < n; k++) {
+      const index = dir === 1 ? k : n - 2 - k;
+      if (index >= 0 && index < n) out[index] = hasBefore[k] && hasAfter[k] ? 1 : 0;
+    }
+    return out;
   }
 
   private build(
@@ -151,6 +195,9 @@ export class Congestion {
       const real = stop && this.measured.ratioAt(stop.id, route.line, dir, date);
       if (real !== null && real !== undefined) return real;
     }
+
+    // 자료가 받쳐 주지 않는 구간이면 숫자를 내지 않는다.
+    if (!this.supported.get(`${routeId}|${dir}`)?.[index]) return null;
 
     const seg = this.profiles.get(`${routeId}|${dir}|${Math.floor(hour) % 24}`);
     if (!seg) return null;

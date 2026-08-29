@@ -463,14 +463,25 @@ for (const [lineId, adj] of graphs) {
 
 const uniqueStations = [];
 const seenPlace = new Map();
+/**
+ * 노선별 역 id → 통합된 대표 id.
+ *
+ * 환승역은 노선마다 별도 id 를 갖는데(강남은 2호선 것과 신분당선 것) 통합
+ * 목록에는 하나만 남는다. 노선이 자기 id 를 그대로 들고 있으면 역 id 로
+ * 붙는 자료(승하차·시간표·혼잡도)를 환승역에서 못 찾는다.
+ */
+const canonicalId = new Map();
 for (const s of stations) {
   const key = `${s.name}|${s.lng.toFixed(4)}|${s.lat.toFixed(4)}`;
-  if (seenPlace.has(key)) {
-    seenPlace.get(key).lines.add(s.line);
+  const seen = seenPlace.get(key);
+  if (seen) {
+    seen.lines.add(s.line);
+    canonicalId.set(s.id, seen.id);
     continue;
   }
   const rec = { ...s, lines: new Set([s.line]) };
   seenPlace.set(key, rec);
+  canonicalId.set(s.id, s.id);
   uniqueStations.push(rec);
 }
 
@@ -480,6 +491,7 @@ const network = {
   routes: routes.map((r) => ({
     ...r,
     coords: r.coords.map((c) => [Number(c[0].toFixed(6)), Number(c[1].toFixed(6))]),
+    stations: r.stations.map((st) => ({ ...st, id: canonicalId.get(st.id) ?? st.id })),
   })),
   stations: uniqueStations.map((s) => ({
     id: s.id,

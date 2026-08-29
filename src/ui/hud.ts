@@ -141,6 +141,7 @@ function renderCrowdLegend(): string {
     <div class="lg-row">
       <span class="lg-title">열차 혼잡도</span>
       ${swatches}
+      <span class="lg-item"><i style="background:#6b6862"></i>자료 없음</span>
     </div>
     <div class="lg-row">
       <span class="lg-title">역 기둥</span>
