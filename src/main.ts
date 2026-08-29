@@ -26,12 +26,14 @@ import { mountHud } from "./ui/hud";
 
 const state: SimState = {
   clockMs: Date.now(),
-  speed: 5,
+  // 실시간이 기본이라 배속은 의미가 없다. 시뮬레이션으로 바꾸면 올릴 수 있다.
+  speed: 1,
   eco: false,
   underground: false,
   // 열차와 노선 색이 어두운 바탕에서 훨씬 잘 보여 야간을 기본으로 둔다.
   night: true,
-  live: false,
+  // 실제로 달리는 열차를 보여 주는 쪽이 이 앱의 본래 목적이다.
+  live: true,
   crowd: false,
   hiddenLines: new Set(),
 };
@@ -186,6 +188,7 @@ const liveTrains = createLiveController(
       state.live = false;
       liveFleet.clear();
       trains = seedTrains(routes, state, timetable);
+      hud.setScrubEnabled(true, "시각을 끌어 보세요");
     }
     hud.setLive(state.live, describeLive(status));
   },
@@ -207,7 +210,19 @@ document.addEventListener("visibilitychange", () => {
 });
 window.visualViewport?.addEventListener("resize", syncMapSize);
 
-hud.setScrubEnabled(true, "시각을 끌어 보세요");
+/**
+ * 실시간을 기본으로 켠다.
+ * 첫 응답이 오기 전에는 시드한 시뮬레이션 열차가 화면을 채우고, 응답이 오면
+ * 그 자리에 실제 열차가 들어선다. 한도 초과나 오류가 나면 컨트롤러가
+ * 시뮬레이션으로 되돌린다.
+ */
+function applyLiveState() {
+  hud.setLive(state.live, "");
+  hud.setScrubEnabled(!state.live, state.live ? "실시간" : "시각을 끌어 보세요");
+}
+
+applyLiveState();
+if (state.live) liveTrains.start();
 
 function hideLoader() {
   if (!loader.isConnected) return;
