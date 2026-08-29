@@ -325,17 +325,33 @@ for (const row of ordered.stationList) {
   bySubway.get(lineId).push(row);
 }
 
-function splitOrdered(rows) {
+/**
+ * 역번호가 크게 뛰어도 두 역이 붙어 있으면 같은 갈래로 본다.
+ *
+ * 단계별로 개통한 노선은 연장 구간에 다른 번호대를 받는다. 신분당선
+ * 양재시민의숲(…689) → 청계산입구(…6810)가 6121 뛰지만 실제로는 2.9km 이웃이다.
+ * 번호만 보고 자르면 이어진 노선이 화면에서 끊긴다.
+ */
+const CONTINUOUS_M = 4200;
+
+function isContinuous(lineId, a, b) {
+  const sa = lookup(nameIndex, `${lineId}:${a.STATN_NM}`) || lookup(nameIndex, a.STATN_NM);
+  const sb = lookup(nameIndex, `${lineId}:${b.STATN_NM}`) || lookup(nameIndex, b.STATN_NM);
+  if (!sa || !sb) return false;
+  return haversine([sa.lng, sa.lat], [sb.lng, sb.lat]) <= CONTINUOUS_M;
+}
+
+function splitOrdered(lineId, rows) {
   const groups = [];
   let current = [];
-  let prevId = null;
+  let prev = null;
   for (const row of rows) {
-    if (prevId !== null && row.STATN_ID - prevId > 80) {
+    if (prev !== null && row.STATN_ID - prev.STATN_ID > 80 && !isContinuous(lineId, prev, row)) {
       if (current.length) groups.push(current);
       current = [];
     }
     current.push(row);
-    prevId = row.STATN_ID;
+    prev = row;
   }
   if (current.length) groups.push(current);
   return groups;
@@ -385,7 +401,7 @@ const usedLineIds = new Set();
 for (const [lineId, rows] of bySubway) {
   const meta = LINE_META[lineId];
   if (!meta) continue;
-  const groups = splitOrdered(rows);
+  const groups = splitOrdered(lineId, rows);
   groups.forEach((group, idx) => {
     const found = stationsFromNames(lineId, group.map((r) => r.STATN_NM));
     if (found.length < 2) return;
