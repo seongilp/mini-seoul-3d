@@ -212,6 +212,8 @@ export function placeLiveTrains(
       const pose = pointAlong(route.coords, route.dist, route.length, along);
       trains.push({
         id: `live:${anchor.live.line}:${anchor.live.trainNo}`,
+        // 같은 보고가 반복되는지 판별하는 값. 바뀔 때만 위치를 보정한다.
+        reportKey: `${anchor.live.stationName}|${anchor.live.status}`,
         routeId: route.id,
         line: route.line,
         color: route.color,

@@ -176,7 +176,7 @@ const liveTrains = createLiveController(
   new RouteIndex(routes, network.stations),
   activeLines,
   (next) => {
-    liveFleet.update(next, performance.now());
+    liveFleet.update(next);
   },
   (status) => {
     if (status.kind === "error") console.error("live:", status.message);
@@ -453,7 +453,7 @@ function frame(now: number) {
   if (step) {
     if (state.live) {
       // 첫 응답 전에는 시뮬레이션 열차를 그대로 두어 화면이 비지 않게 한다.
-      if (liveFleet.hasData()) trains = liveFleet.sample(now);
+      if (liveFleet.hasData()) trains = liveFleet.step(routes, state, pendingDt);
       else stepFleet(trains, routes, state, pendingDt);
     } else {
       if (now - signatureCheckedAt > SIGNATURE_INTERVAL_MS) {

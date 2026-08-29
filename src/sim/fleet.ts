@@ -20,6 +20,11 @@ export type Train = {
   speed: number;
   /** 혼잡도(1 = 정원). 사람 보기 모드에서만 채워진다. */
   congestion?: number;
+  /**
+   * 실시간 API 가 보고한 상태를 요약한 값(기준역 + 진입·도착·출발).
+   * 이 값이 그대로면 같은 보고가 반복되는 것이므로 위치를 끌어당기지 않는다.
+   */
+  reportKey?: string;
 };
 
 export type PreparedRoute = Route & {
