@@ -72,17 +72,37 @@ function formatMinutes(minutes: number): string {
  * 오른쪽 툴바. 아이콘만으로는 무엇인지 알기 어려워서 이름과 설명을 함께 둔다.
  * 도움말 팔레트도 이 목록을 그대로 쓴다.
  */
-const TOOLBAR = [
+const TOOLBAR: ReadonlyArray<{
+  id: string;
+  icon: string;
+  name: string;
+  desc: string;
+  /** 글자가 들어가는 버튼은 아이콘보다 작게 써야 40px 안에 들어간다. */
+  variant?: "text" | "stack";
+}> = [
   { id: "btn-search-focus", icon: "⌕", name: "역 검색", desc: "역 이름으로 찾아 이동합니다" },
   { id: "btn-night", icon: "☾", name: "야간", desc: "어두운 지도로 바꿉니다" },
-  { id: "btn-under", icon: "地下", name: "지하", desc: "건물을 낮춰 지하 구간이 드러납니다" },
+  {
+    id: "btn-under",
+    icon: "地下",
+    name: "지하",
+    desc: "건물을 낮춰 지하 구간이 드러납니다",
+    variant: "stack",
+  },
   { id: "btn-play", icon: "×1", name: "배속", desc: "시간이 흐르는 속도 ×1 → ×5 → ×15" },
-  { id: "btn-eco", icon: "ECO", name: "절전", desc: "열차 수와 갱신을 줄여 가볍게 돌립니다" },
+  {
+    id: "btn-eco",
+    icon: "ECO",
+    name: "절전",
+    desc: "열차 수와 갱신을 줄여 가볍게 돌립니다",
+    variant: "text",
+  },
   {
     id: "btn-live",
     icon: "LIVE",
     name: "실시간",
     desc: "서울시 실시간 위치로 실제 열차를 띄웁니다",
+    variant: "text",
   },
   {
     id: "btn-crowd",
@@ -93,7 +113,7 @@ const TOOLBAR = [
   { id: "btn-layers", icon: "≡", name: "노선", desc: "노선을 하나씩 켜고 끕니다" },
   { id: "btn-full", icon: "⛶", name: "전체화면", desc: "브라우저를 전체화면으로" },
   { id: "btn-help", icon: "?", name: "도움말", desc: "사용법을 봅니다" },
-] as const;
+];
 
 /** 지도 조작과 클릭 동작. 툴바 설명과 함께 도움말에 함께 보여 준다. */
 const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
@@ -172,7 +192,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     <div class="toolbar">
       ${TOOLBAR.map(
         (b) =>
-          `<button id="${b.id}" data-tip="${b.name}" data-sub="${b.desc}" aria-label="${b.name}">${b.icon}</button>`,
+          `<button id="${b.id}" class="${b.variant ?? ""}" aria-label="${b.name}">${b.icon}</button>`,
       ).join("")}
     </div>
     <div class="tip" id="tip" hidden></div>

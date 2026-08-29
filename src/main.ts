@@ -29,7 +29,8 @@ const state: SimState = {
   speed: 5,
   eco: false,
   underground: false,
-  night: false,
+  // 열차와 노선 색이 어두운 바탕에서 훨씬 잘 보여 야간을 기본으로 둔다.
+  night: true,
   live: false,
   crowd: false,
   hiddenLines: new Set(),
