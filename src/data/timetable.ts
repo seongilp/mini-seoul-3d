@@ -113,6 +113,9 @@ export function displayTime(time: string): string {
 
 export type LineWindow = { first: number; last: number };
 
+/** 시간표가 없는 노선에 쓰는 운행 시간대. 05:30 ~ 다음날 00:30. */
+const DEFAULT_WINDOW: LineWindow = { first: 5 * 60 + 30, last: 24 * 60 + 30 };
+
 export class Timetable {
   private readonly stations: Record<string, StationTable>;
   /** 노선·요일별 운행 시간대. 그 노선 모든 역의 첫차·막차를 아우른다. */
@@ -171,12 +174,13 @@ export class Timetable {
 
   /**
    * 지금 그 노선이 운행 중인지.
-   * 시간표가 없는 노선은 판단할 수 없으므로 true 를 돌려준다. 없는 정보로
-   * 열차를 지우면 화면에서 노선이 통째로 사라진다.
+   *
+   * 시간표가 없는 노선(1~9호선 외)은 실제 첫차·막차를 알 수 없어서 국내
+   * 도시철도에서 흔한 05:30~00:30 을 기본값으로 쓴다. 정확하지는 않지만
+   * 새벽 3시에 열차가 돌아다니는 것보다는 실제에 가깝다.
    */
   isInService(line: string, date: Date): boolean {
-    const w = this.windowFor(line, date);
-    if (!w) return true;
+    const w = this.windowFor(line, date) ?? DEFAULT_WINDOW;
     const now = nowMinutes(date);
     return now >= w.first && now <= w.last;
   }

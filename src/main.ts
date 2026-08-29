@@ -4,7 +4,14 @@ import { addTransitLayers } from "./map/layers";
 import { CrowdLayer } from "./map/crowd";
 import { addTrainLayers, TRAIN_HIT_LAYER, updateTrains } from "./map/trains";
 import { Congestion, congestionLabel } from "./sim/congestion";
-import { headsign, prepareRoutes, seedTrains, stepFleet, type Train } from "./sim/fleet";
+import {
+  headsign,
+  prepareRoutes,
+  retimeFleet,
+  seedTrains,
+  stepFleet,
+  type Train,
+} from "./sim/fleet";
 import type { Network, SimState } from "./types";
 import { loadRidership } from "./data/ridership";
 import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
@@ -94,24 +101,14 @@ const hud = mountHud(hudRoot, network, state, {
   onLayers() {},
   onNow() {
     state.clockMs = Date.now();
-    const at = currentHour();
-    if (state.crowd && crowd) {
-      crowd.update(map, at);
-      hud.updateCrowdNote(at);
-    }
-    hud.setFlowHour(at);
+    syncToClock();
   },
   onScrub(hour) {
     // 슬라이더로 옮긴 시각을 시뮬레이션 시계에 반영한다.
     const d = new Date(state.clockMs);
     d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
     state.clockMs = d.getTime();
-    const at = currentHour();
-    if (state.crowd && crowd) {
-      crowd.update(map, at);
-      hud.updateCrowdNote(at);
-    }
-    hud.setFlowHour(at);
+    syncToClock();
   },
   onCrowd() {
     state.crowd = !state.crowd;
@@ -266,6 +263,24 @@ function attachCrowd() {
   crowd.update(map, currentHour());
 }
 
+/**
+ * 시각이 바뀐 뒤 화면을 그 시각 상태로 맞춘다.
+ * 슬라이더를 끌거나 "지금" 을 눌렀을 때 호출한다.
+ */
+function syncToClock() {
+  const at = currentHour();
+  if (!state.live) {
+    trains = retimeFleet(trains, routes, state, timetable);
+    if (state.crowd) applyCongestion(trains, at);
+    if (map.isStyleLoaded()) updateTrains(map, trains);
+  }
+  if (state.crowd && crowd) {
+    crowd.update(map, at);
+    hud.updateCrowdNote(at);
+  }
+  hud.setFlowHour(at);
+}
+
 /** 지금 화면이 나타내는 시각을 0~24 소수로. */
 function currentHour(): number {
   const at = state.live ? new Date() : new Date(state.clockMs);
@@ -389,11 +404,12 @@ map.on("mouseleave", "metro-station-ring", () => {
  * 첫차·막차 경계를 수시로 넘는다. 이 값이 바뀌면 열차를 다시 배치한다.
  */
 function serviceSignature(clockMs: number): string {
-  if (!timetable) return "";
   const at = new Date(clockMs);
-  return routes
-    .map((r) => (timetable!.isInService(r.line, at) ? "1" : "0"))
-    .join("");
+  const service = timetable
+    ? routes.map((r) => (timetable!.isInService(r.line, at) ? "1" : "0")).join("")
+    : "";
+  // 시간대별 운행 밀도도 서명에 넣어, 출퇴근에 열차가 늘고 심야에 줄게 한다.
+  return `${at.getHours()}|${service}`;
 }
 
 let lastSignature = "";
@@ -419,12 +435,13 @@ function frame(now: number) {
       if (liveFleet.hasData()) trains = liveFleet.sample(now);
       else stepFleet(trains, routes, state, pendingDt);
     } else {
-      if (timetable && now - signatureCheckedAt > SIGNATURE_INTERVAL_MS) {
+      if (now - signatureCheckedAt > SIGNATURE_INTERVAL_MS) {
         signatureCheckedAt = now;
         const signature = serviceSignature(state.clockMs);
         if (signature !== lastSignature) {
           lastSignature = signature;
-          trains = seedTrains(routes, state, timetable);
+          // 달리던 열차는 두고 수만 맞춘다. 통째로 다시 뿌리면 다 순간이동한다.
+          trains = retimeFleet(trains, routes, state, timetable);
         }
       }
       stepFleet(trains, routes, state, pendingDt);

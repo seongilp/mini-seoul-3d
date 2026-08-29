@@ -91,6 +91,47 @@ function terminalName(route: PreparedRoute, dir: 1 | -1): string {
  * timetable 을 넘기면 첫차 전·막차 후에는 그 노선 열차를 만들지 않는다.
  * 시간표가 없는 노선(1~9호선 외)은 판단할 수 없어 종일 운행한다.
  */
+/** 그 시각 한 방향에 몇 대가 다녀야 하는지. 배차 간격과 시간대 밀도로 정한다. */
+function perDirectionCount(route: PreparedRoute, state: SimState, factor: number): number {
+  const spacing = route.headway * 60 * CRUISE;
+  let count = Math.max(2, Math.round((route.length / spacing) * factor));
+  if (state.eco) count = Math.max(1, Math.round(count * 0.45));
+  return Math.max(1, Math.round(count / 2));
+}
+
+/** 그 노선이 지금 열차를 굴려야 하는지. */
+function routeActive(
+  route: PreparedRoute,
+  state: SimState,
+  clock: Date,
+  timetable?: Timetable | null,
+): boolean {
+  if (state.hiddenLines.has(route.line)) return false;
+  if (timetable && !timetable.isInService(route.line, clock)) return false;
+  return true;
+}
+
+let serial = 0;
+
+function makeTrain(route: PreparedRoute, dir: 1 | -1, along: number): Train {
+  const pose = pointAlong(route.coords, route.dist, route.length, along);
+  return {
+    id: `${route.id}:${dir}:${serial++}`,
+    routeId: route.id,
+    line: route.line,
+    color: route.color,
+    cars: route.cars,
+    destination: terminalName(route, dir),
+    dir,
+    along,
+    dwell: 0,
+    lastStop: -1,
+    speed: 0,
+    coord: pose.coord,
+    heading: pose.heading,
+  };
+}
+
 export function seedTrains(
   routes: PreparedRoute[],
   state: SimState,
@@ -99,37 +140,101 @@ export function seedTrains(
   const trains: Train[] = [];
   const clock = new Date(state.clockMs);
   const factor = hourFactor(state.clockMs);
+
   for (const route of routes) {
-    if (state.hiddenLines.has(route.line)) continue;
-    if (timetable && !timetable.isInService(route.line, clock)) continue;
-    const spacing = route.headway * 60 * CRUISE;
-    let count = Math.max(2, Math.round((route.length / spacing) * factor));
-    if (state.eco) count = Math.max(1, Math.round(count * 0.45));
-    const dirs: Array<1 | -1> = route.loop ? [1, -1] : [1, -1];
-    for (const dir of dirs) {
-      const n = Math.max(1, Math.round(count / dirs.length));
+    if (!routeActive(route, state, clock, timetable)) continue;
+    for (const dir of [1, -1] as const) {
+      const n = perDirectionCount(route, state, factor);
       for (let i = 0; i < n; i++) {
-        const along = ((i + 0.12) / n) * route.length;
-        const pose = pointAlong(route.coords, route.dist, route.length, along);
-        trains.push({
-          id: `${route.id}:${dir}:${i}`,
-          routeId: route.id,
-          line: route.line,
-          color: route.color,
-          cars: route.cars,
-          destination: terminalName(route, dir),
-          dir,
-          along,
-          dwell: 0,
-          lastStop: -1,
-          speed: 0,
-          coord: pose.coord,
-          heading: pose.heading,
-        });
+        trains.push(makeTrain(route, dir, ((i + 0.12) / n) * route.length));
       }
     }
   }
   return trains;
+}
+
+/**
+ * 지금 시각에 맞게 열차 수를 맞춘다.
+ *
+ * 통째로 다시 뿌리면 화면의 모든 열차가 순간이동한다. 그래서 이미 달리던
+ * 열차는 그대로 두고, 모자라면 가장 넓은 간격에 끼워 넣고 남으면 덜어낸다.
+ * 시각을 크게 건너뛰어도 자연스럽고, 출퇴근 시간대에 열차가 서서히 늘어난다.
+ */
+export function retimeFleet(
+  trains: Train[],
+  routes: PreparedRoute[],
+  state: SimState,
+  timetable?: Timetable | null,
+): Train[] {
+  const clock = new Date(state.clockMs);
+  const factor = hourFactor(state.clockMs);
+
+  const existing = new Map<string, Train[]>();
+  for (const train of trains) {
+    const key = `${train.routeId}|${train.dir}`;
+    const list = existing.get(key);
+    if (list) list.push(train);
+    else existing.set(key, [train]);
+  }
+
+  const out: Train[] = [];
+  for (const route of routes) {
+    if (!routeActive(route, state, clock, timetable)) continue;
+
+    for (const dir of [1, -1] as const) {
+      const want = perDirectionCount(route, state, factor);
+      const have = (existing.get(`${route.id}|${dir}`) ?? []).slice(0, want);
+
+      if (have.length === 0) {
+        // 처음부터 채울 때는 노선 전체에 고르게 벌려 놓는다.
+        for (let i = 0; i < want; i++) {
+          out.push(makeTrain(route, dir, ((i + 0.12) / want) * route.length));
+        }
+        continue;
+      }
+
+      out.push(...have);
+
+      // 넣을 때마다 방금 넣은 것까지 셈에 넣어야 한 자리에 쌓이지 않는다.
+      const placed = [...have];
+      for (let i = have.length; i < want; i++) {
+        const train = makeTrain(route, dir, widestGap(route, placed));
+        placed.push(train);
+        out.push(train);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 이미 있는 열차들 사이에서 가장 넓은 간격의 한가운데.
+ * 새 열차를 여기에 넣어야 기존 열차와 겹치지 않는다.
+ */
+function widestGap(route: PreparedRoute, trains: Train[]): number {
+  if (trains.length === 0) return route.length * 0.12;
+
+  const spots = trains.map((t) => t.along).sort((a, b) => a - b);
+  let best = spots[0] / 2;
+  let bestSize = spots[0];
+
+  for (let i = 1; i < spots.length; i++) {
+    const size = spots[i] - spots[i - 1];
+    if (size > bestSize) {
+      bestSize = size;
+      best = spots[i - 1] + size / 2;
+    }
+  }
+
+  // 순환선은 끝과 처음 사이도 간격이다.
+  const wrap = route.loop
+    ? route.length - spots[spots.length - 1] + spots[0]
+    : route.length - spots[spots.length - 1];
+  if (wrap > bestSize) {
+    best = (spots[spots.length - 1] + wrap / 2) % route.length;
+  }
+
+  return best;
 }
 
 let routeIndex: Map<string, PreparedRoute> | null = null;
