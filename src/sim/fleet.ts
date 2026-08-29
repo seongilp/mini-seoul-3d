@@ -240,6 +240,18 @@ function widestGap(route: PreparedRoute, trains: Train[]): number {
 let routeIndex: Map<string, PreparedRoute> | null = null;
 let indexedRoutes: PreparedRoute[] | null = null;
 
+/** 열차가 다음에 설 역 이름. 종착으로 향하는 중이면 빈 문자열. */
+export function nextStationName(
+  routes: PreparedRoute[],
+  train: Train,
+): { name: string; distance: number } | null {
+  const route = routes.find((r) => r.id === train.routeId);
+  if (!route) return null;
+  const target = nextTarget(route, train.along, train.dir);
+  if (!target.stop) return null;
+  return { name: target.stop.name, distance: target.distance };
+}
+
 /** 진행 방향으로 가장 가까운 다음 정차 지점. 종착역이면 stop 이 null 이다. */
 type Target = { stop: RouteStation | null; distance: number };
 

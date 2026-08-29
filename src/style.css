@@ -723,3 +723,8 @@ body {
 .timebar-hint[hidden] {
   display: none;
 }
+
+.follow-next {
+  font-size: 11px;
+  color: var(--muted);
+}

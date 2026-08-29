@@ -10,6 +10,9 @@ export type FollowInfo = {
   color: string;
   destination: string;
   congestion: string | null;
+  /** 다음 정차역과 남은 거리. 종착으로 향하는 중이면 null. */
+  next: { name: string; distance: number } | null;
+  dwelling: boolean;
 };
 
 export type HudHandlers = {
@@ -30,6 +33,11 @@ export type HudHandlers = {
   /** 시계를 실제 현재 시각으로 되돌릴 때. */
   onNow: () => void;
 };
+
+/** 남은 거리를 사람이 읽는 표기로. */
+function formatDistance(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)}km` : `${Math.round(meters / 10) * 10}m`;
+}
 
 /** 서울 기준 현재 시각을 자정 기준 분으로. */
 function seoulMinutesNow(): number {
@@ -486,7 +494,12 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         lastFollowKey = "";
         return;
       }
-      const key = `${info.line}|${info.destination}|${info.congestion ?? ""}`;
+      const nextText = info.dwelling
+        ? "정차 중"
+        : info.next
+          ? `다음 ${info.next.name} · ${formatDistance(info.next.distance)}`
+          : "종착역으로";
+      const key = `${info.line}|${info.destination}|${info.congestion ?? ""}|${nextText}`;
       follow.hidden = false;
       if (key === lastFollowKey) return;
       lastFollowKey = key;
@@ -496,8 +509,10 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         <span class="follow-line"></span>
         <span class="follow-dest"></span>
         <span class="follow-cong"></span>
+        <span class="follow-next"></span>
         <span class="follow-hint">Esc 로 해제</span>
       `;
+      follow.querySelector(".follow-next")!.textContent = nextText;
       (follow.querySelector(".follow-dot") as HTMLElement).style.background = info.color;
       follow.querySelector(".follow-line")!.textContent = info.line;
       follow.querySelector(".follow-dest")!.textContent = info.destination;

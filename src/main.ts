@@ -6,6 +6,7 @@ import { addTrainLayers, TRAIN_HIT_LAYER, updateTrains } from "./map/trains";
 import { Congestion, congestionLabel } from "./sim/congestion";
 import {
   headsign,
+  nextStationName,
   prepareRoutes,
   retimeFleet,
   seedTrains,
@@ -233,7 +234,7 @@ function paintOverlay() {
     return;
   }
   try {
-    addTrainLayers(map, trains);
+    addTrainLayers(map, trains, routes);
     setUnderground(map, state.underground, state.night);
   } catch (error) {
     console.error("trains failed", error);
@@ -473,6 +474,8 @@ function frame(now: number) {
         destination: headsign(target.destination),
         congestion:
           target.congestion === undefined ? null : congestionLabel(target.congestion),
+        next: nextStationName(routes, target),
+        dwelling: target.dwell > 0,
       });
     } else {
       // 실시간 갱신에서 사라진 열차(회차·종료)는 놓아 준다.
