@@ -1,5 +1,6 @@
 import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
 import type { Ridership } from "../data/ridership";
+import { congestionColor } from "../sim/congestion";
 import type { UpcomingStop } from "../sim/fleet";
 import { renderStationChart } from "./sparkline";
 import { displayTime, type Timetable } from "../data/timetable";
@@ -11,6 +12,8 @@ export type FollowInfo = {
   color: string;
   destination: string;
   congestion: string | null;
+  /** 혼잡도가 실측인지 추정인지. */
+  congestionMeasured: boolean;
   /** 다음 정차역과 남은 거리. 종착으로 향하는 중이면 null. */
   next: { name: string; distance: number } | null;
   dwelling: boolean;
@@ -115,6 +118,38 @@ const TOOLBAR: ReadonlyArray<{
   { id: "btn-help", icon: "?", name: "도움말", desc: "사용법을 봅니다" },
 ];
 
+/**
+ * 사람 보기 모드의 색 범례.
+ * 기둥은 승하차 방향, 열차는 혼잡도라 뜻이 다르므로 둘 다 적어 준다.
+ */
+function renderCrowdLegend(): string {
+  const bands: Array<[number, string]> = [
+    [0.3, "여유"],
+    [0.65, "보통"],
+    [0.95, "혼잡"],
+    [1.25, "매우 혼잡"],
+    [1.5, "극심"],
+  ];
+  const swatches = bands
+    .map(
+      ([ratio, label]) =>
+        `<span class="lg-item"><i style="background:${congestionColor(ratio)}"></i>${label}</span>`,
+    )
+    .join("");
+
+  return `
+    <div class="lg-row">
+      <span class="lg-title">열차 혼잡도</span>
+      ${swatches}
+    </div>
+    <div class="lg-row">
+      <span class="lg-title">역 기둥</span>
+      <span class="lg-item"><i style="background:#6fb6e8"></i>하차 우세</span>
+      <span class="lg-item"><i style="background:#ff7a30"></i>승차 우세</span>
+      <span class="lg-note">높이 = 승하차 인원</span>
+    </div>`;
+}
+
 /** 지도 조작과 클릭 동작. 툴바 설명과 함께 도움말에 함께 보여 준다. */
 const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
   {
@@ -174,7 +209,9 @@ function renderHelp(): string {
       ${buttons}
     </div>
     <div class="help-foot">
-      데이터 · 서울 열린데이터광장 (실시간 위치 · 도착정보 · 시간표 · 시간대별 이용현황)
+      데이터 · 서울 열린데이터광장 (실시간 위치 · 도착정보 · 시간표 · 시간대별 이용현황)<br />
+      열차 혼잡도 · 서울교통공사 지하철혼잡도정보 (1~8호선 실측).
+      자료가 없는 노선은 승하차로 어림한 값이라 패널에 "추정" 으로 표시된다.
     </div>`;
 }
 
@@ -212,6 +249,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
         <div class="help-body" id="help-body"></div>
       </div>
     </div>
+    <div class="crowd-legend" id="crowd-legend" hidden></div>
     <div class="follow" id="follow" hidden></div>
     <div class="timebar" id="timebar">
       <span class="timebar-label" id="timebar-label">--:--</span>
@@ -243,6 +281,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const nowBtn = root.querySelector("#timebar-now") as HTMLButtonElement;
   const tip = root.querySelector("#tip") as HTMLElement;
   const help = root.querySelector("#help") as HTMLElement;
+  const crowdLegend = root.querySelector("#crowd-legend") as HTMLElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -543,6 +582,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       info.destination,
       status,
       info.congestion ?? "",
+      String(info.congestionMeasured),
       info.stops.map((s) => `${s.name}${Math.floor(s.etaSec / 5)}`).join(","),
     ].join("|");
     if (key === lastPanelKey) return;
@@ -569,7 +609,17 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     if (info.congestion) {
       const tag = document.createElement("em");
       tag.textContent = info.congestion;
+      // 실측이 아닌 값을 실측처럼 보이게 하면 안 된다.
+      tag.title = info.congestionMeasured
+        ? "서울교통공사 실측 혼잡도"
+        : "승하차 자료로 어림한 값";
+      if (!info.congestionMeasured) tag.classList.add("is-estimate");
       statusEl.appendChild(tag);
+
+      const note = document.createElement("small");
+      note.className = "train-cong-src";
+      note.textContent = info.congestionMeasured ? "실측" : "추정";
+      statusEl.appendChild(note);
     }
 
     const list = popup.querySelector(".train-stops") as HTMLElement;
@@ -698,6 +748,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       crowdOn = on;
       crowdBtn.setAttribute("aria-pressed", String(on));
       crowdBtn.classList.toggle("is-crowd", on);
+      crowdLegend.hidden = !on;
+      if (on && !crowdLegend.innerHTML) crowdLegend.innerHTML = renderCrowdLegend();
       if (!on) crowdNote = "";
     },
     /** 승하차 요약. 시각이 바뀔 때만 다시 계산한다(전 역 합계라 가볍지 않다). */

@@ -1017,3 +1017,72 @@ body {
     min-width: 0;
   }
 }
+
+.crowd-legend {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 13px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.crowd-legend[hidden] {
+  display: none;
+}
+
+.lg-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.lg-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  min-width: 62px;
+}
+
+.lg-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.lg-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.lg-note {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .crowd-legend {
+    display: none;
+  }
+}
+
+.train-status em.is-estimate {
+  background: rgba(246, 240, 228, 0.09);
+  color: var(--muted);
+}
+
+.train-cong-src {
+  font-size: 10px;
+  color: var(--muted);
+}

@@ -184,8 +184,11 @@ class TrainLayer implements CustomLayerInterface {
       const width = Math.max(carLength * CAR_WIDTH, MIN_WIDTH_PX * perPixel);
       const height = width * (CAR_HEIGHT / CAR_WIDTH);
 
+      // 혼잡도 값은 늘 들어 있지만, 색으로 쓸지는 화면 모드가 정한다.
       this.color.set(
-        train.congestion === undefined ? train.color : congestionColor(train.congestion),
+        colorByCongestion && train.congestion !== undefined
+          ? congestionColor(train.congestion)
+          : train.color,
       );
       const route = this.routes.get(train.routeId);
 
@@ -304,6 +307,14 @@ export function addTrainLayers(
   layer.setTrains(trains);
   map.addLayer(layer);
   addLabelLayer(map);
+}
+
+/** 열차를 노선 색 대신 혼잡도 색으로 칠할지. */
+let colorByCongestion = false;
+
+export function setTrainColorMode(map: MapLibreMap, byCongestion: boolean): void {
+  colorByCongestion = byCongestion;
+  map.triggerRepaint();
 }
 
 let lastLabelAt = 0;

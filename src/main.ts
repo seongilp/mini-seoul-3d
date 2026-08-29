@@ -3,7 +3,12 @@ import { createMap, restyleBase, setUnderground, STYLES } from "./map/createMap"
 import { addTransitLayers } from "./map/layers";
 import { CrowdLayer } from "./map/crowd";
 import { StationFocus } from "./map/focus";
-import { addTrainLayers, TRAIN_HIT_LAYER, updateTrains } from "./map/trains";
+import {
+  addTrainLayers,
+  setTrainColorMode,
+  TRAIN_HIT_LAYER,
+  updateTrains,
+} from "./map/trains";
 import { Congestion, congestionLabel } from "./sim/congestion";
 import {
   headsign,
@@ -16,6 +21,7 @@ import {
   type Train,
 } from "./sim/fleet";
 import type { Network, SimState, Station } from "./types";
+import { loadCongestionData } from "./data/congestion-data";
 import { loadRidership } from "./data/ridership";
 import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
 import { createLiveController, type LiveStatus } from "./live/controller";
@@ -112,12 +118,8 @@ const hud = mountHud(hudRoot, network, state, {
   onCrowd() {
     state.crowd = !state.crowd;
     crowd?.setVisible(map, state.crowd);
-    if (state.crowd) {
-      crowd?.update(map, currentHour());
-      applyCongestion(trains, currentHour());
-    } else {
-      clearCongestion(trains);
-    }
+    if (state.crowd) crowd?.update(map, currentHour());
+    setTrainColorMode(map, state.crowd);
     hud.setCrowd(state.crowd);
   },
   onLive() {
@@ -246,6 +248,7 @@ function paintOverlay() {
   }
   try {
     addTrainLayers(map, trains, routes);
+    setTrainColorMode(map, state.crowd);
     setUnderground(map, state.underground, state.night);
   } catch (error) {
     console.error("trains failed", error);
@@ -331,6 +334,8 @@ void loadRidership()
     congestion = new Congestion(routes, network.stations, loaded);
     hud.setRidership(loaded);
     attachCrowd();
+    // 실측 혼잡도는 늦게 와도 된다. 오면 추정값 대신 쓰인다.
+    void loadCongestionData().then((measured) => congestion?.setMeasured(measured));
   })
   .catch((error) => {
     // 여기서 던지면 사람 보기 기능만 빠지고 나머지는 계속 돌아야 한다.
@@ -343,15 +348,14 @@ void loadRidership()
  */
 function applyCongestion(list: Train[], hour: number) {
   if (!congestion) return;
+  const at = state.live ? new Date() : new Date(state.clockMs);
   for (const train of list) {
-    const ratio = congestion.ratioAt(train.routeId, train.dir, hour, train.along);
+    const ratio = congestion.ratioAt(train.routeId, train.dir, hour, train.along, at);
     train.congestion = ratio ?? undefined;
   }
 }
 
-function clearCongestion(list: Train[]) {
-  for (const train of list) train.congestion = undefined;
-}
+
 
 /**
  * 시간표는 없어도 앱이 동작하므로 시작을 막지 않는다. 도착하면 HUD 에 넘기고
@@ -483,8 +487,9 @@ function frame(now: number) {
       stepFleet(trains, routes, state, pendingDt);
     }
     pendingDt = 0;
-    // 실시간 모드는 매 프레임 열차 객체를 새로 만들어서, 그리기 직전에 다시 매겨야 한다.
-    if (state.crowd) applyCongestion(trains, currentHour());
+    // 혼잡도는 항상 매긴다. 열차를 눌렀을 때 패널에 보여 줘야 하기 때문이다.
+    // 실시간 모드는 매 프레임 열차 객체를 새로 만들어서 그리기 직전에 매긴다.
+    applyCongestion(trains, currentHour());
     if (map.isStyleLoaded()) updateTrains(map, trains);
   }
 
@@ -510,7 +515,16 @@ function frame(now: number) {
         color: target.color,
         destination: headsign(target.destination),
         congestion:
-          target.congestion === undefined ? null : congestionLabel(target.congestion),
+          target.congestion === undefined
+            ? null
+            : `${congestionLabel(target.congestion)} ${Math.round(target.congestion * 100)}%`,
+        congestionMeasured:
+          congestion?.isMeasured(
+            target.routeId,
+            target.dir,
+            target.along,
+            state.live ? new Date() : new Date(state.clockMs),
+          ) ?? false,
         next: nextStationName(routes, target),
         dwelling: target.dwell > 0,
         stops: upcomingStops(routes, target, 7),
