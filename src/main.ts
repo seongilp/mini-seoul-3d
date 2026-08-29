@@ -2,6 +2,7 @@ import "./style.css";
 import { createMap, restyleBase, setUnderground, STYLES } from "./map/createMap";
 import { addTransitLayers } from "./map/layers";
 import { CrowdLayer } from "./map/crowd";
+import { StationFocus } from "./map/focus";
 import { addTrainLayers, TRAIN_HIT_LAYER, updateTrains } from "./map/trains";
 import { Congestion, congestionLabel } from "./sim/congestion";
 import {
@@ -11,9 +12,10 @@ import {
   retimeFleet,
   seedTrains,
   stepFleet,
+  upcomingStops,
   type Train,
 } from "./sim/fleet";
-import type { Network, SimState } from "./types";
+import type { Network, SimState, Station } from "./types";
 import { loadRidership } from "./data/ridership";
 import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
 import { createLiveController, type LiveStatus } from "./live/controller";
@@ -57,14 +59,7 @@ const map = createMap(document.querySelector("#map") as HTMLElement, state.night
 
 const hud = mountHud(hudRoot, network, state, {
   onSearch(station) {
-    stopFollow();
-    hud.showStation(station);
-    map.flyTo({
-      center: [station.lng, station.lat],
-      zoom: Math.max(map.getZoom(), 15.7),
-      pitch: 64,
-      essential: true,
-    });
+    focusStation(station);
   },
   onToggleLine(id) {
     if (state.hiddenLines.has(id)) state.hiddenLines.delete(id);
@@ -241,6 +236,11 @@ function paintOverlay() {
   }
   styleReady = true;
   try {
+    focus.attach(map);
+  } catch (error) {
+    console.error("focus failed", error);
+  }
+  try {
     attachCrowd();
   } catch (error) {
     console.error("crowd failed", error);
@@ -255,6 +255,7 @@ function paintOverlay() {
 let crowd: CrowdLayer | null = null;
 let congestion: Congestion | null = null;
 let styleReady = false;
+const focus = new StationFocus();
 
 function attachCrowd() {
   if (!crowd || !styleReady) return;
@@ -262,6 +263,24 @@ function attachCrowd() {
   crowd.attach(map, "metro-trains-3d");
   crowd.setVisible(map, state.crowd);
   crowd.update(map, currentHour());
+}
+
+/**
+ * 역을 선택했을 때의 카메라 연출.
+ * 승강장이 보일 만큼 내려앉으면서 각도를 세워 역 주변 건물이 드러나게 한다.
+ */
+function focusStation(station: Station) {
+  stopFollow();
+  hud.showStation(station);
+  focus.set(map, station, performance.now());
+  map.flyTo({
+    center: [station.lng, station.lat],
+    zoom: Math.max(map.getZoom(), 16.2),
+    pitch: 66,
+    duration: 1700,
+    curve: 1.5,
+    essential: true,
+  });
 }
 
 /**
@@ -358,6 +377,7 @@ map.on("click", (e) => {
     const id = train.properties?.id as string | undefined;
     if (id) {
       hud.hideStation();
+      focus.clear(map);
       followId = id;
       map.easeTo({ center: e.lngLat, zoom: Math.max(map.getZoom(), 14.2), duration: 600 });
       return;
@@ -369,14 +389,13 @@ map.on("click", (e) => {
     const id = ring.properties?.id as string | undefined;
     const station = network.stations.find((s) => s.id === id);
     if (station) {
-      stopFollow();
-      hud.showStation(station);
-      map.easeTo({ center: [station.lng, station.lat], duration: 400 });
+      focusStation(station);
       return;
     }
   }
 
   hud.hideStation();
+  focus.clear(map);
   stopFollow();
 });
 
@@ -463,6 +482,8 @@ function frame(now: number) {
     }
     hud.setFlowHour(hour);
   }
+  if (styleReady) focus.tick(map, now);
+
   if (followId !== null) {
     const target = trains.find((t) => t.id === followId);
     if (target) {
@@ -476,6 +497,7 @@ function frame(now: number) {
           target.congestion === undefined ? null : congestionLabel(target.congestion),
         next: nextStationName(routes, target),
         dwelling: target.dwell > 0,
+        stops: upcomingStops(routes, target, 7),
       });
     } else {
       // 실시간 갱신에서 사라진 열차(회차·종료)는 놓아 준다.

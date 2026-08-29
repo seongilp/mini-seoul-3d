@@ -728,3 +728,114 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
+
+.train-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.train-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 3px 9px;
+  flex: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.train-dest {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.train-status {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.train-status em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(246, 240, 228, 0.16);
+  color: var(--text);
+}
+
+.train-stops {
+  margin-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.train-stops-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 7px;
+}
+
+.train-stop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  position: relative;
+}
+
+/* 정차역을 선으로 이어 노선처럼 보이게 한다. */
+.train-stop::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--panel-border);
+}
+
+.train-stop:first-of-type::before {
+  top: 50%;
+}
+
+.train-stop:last-child::before {
+  bottom: 50%;
+}
+
+.train-stop-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+  position: relative;
+  box-shadow: 0 0 0 2px rgba(22, 20, 17, 0.9);
+}
+
+.train-stop-name {
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.train-stop-eta {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-left: auto;
+  flex: none;
+}

@@ -1,5 +1,6 @@
 import { ArrivalsError, fetchStationArrivals, formatEta, type StationArrival } from "../live/arrivals";
 import type { Ridership } from "../data/ridership";
+import type { UpcomingStop } from "../sim/fleet";
 import { renderStationChart } from "./sparkline";
 import { displayTime, type Timetable } from "../data/timetable";
 import type { Network, SimState, Station } from "../types";
@@ -13,6 +14,8 @@ export type FollowInfo = {
   /** 다음 정차역과 남은 거리. 종착으로 향하는 중이면 null. */
   next: { name: string; distance: number } | null;
   dwelling: boolean;
+  /** 앞으로 설 역들. 왼쪽 상세 패널에 목록으로 보여 준다. */
+  stops: UpcomingStop[];
 };
 
 export type HudHandlers = {
@@ -33,6 +36,13 @@ export type HudHandlers = {
   /** 시계를 실제 현재 시각으로 되돌릴 때. */
   onNow: () => void;
 };
+
+/** 초를 "3:36" 으로. */
+function formatEtaClock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 /** 남은 거리를 사람이 읽는 표기로. */
 function formatDistance(meters: number): string {
@@ -229,6 +239,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let lastTimeValue = -1;
   let lastFollowKey = "";
   let nowVisible = false;
+  let lastPanelKey = "";
   let crowdBucket = -1;
   /** 팝업 그래프가 가리키는 시각. 시계·슬라이더를 따라 움직인다. */
   let flowHour = 0;
@@ -364,6 +375,74 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     }
   };
 
+  /**
+   * 따라가는 열차의 상세. 역 팝업과 같은 자리를 쓰므로 둘은 동시에 뜨지 않는다.
+   * 매 프레임 불리므로 내용이 그대로면 DOM 을 건드리지 않는다.
+   */
+  const renderTrainPanel = (info: FollowInfo) => {
+    const status = info.dwelling
+      ? "정차 중"
+      : info.next
+        ? `다음 ${info.next.name} · ${formatDistance(info.next.distance)}`
+        : "종착역으로";
+    const key = [
+      info.line,
+      info.destination,
+      status,
+      info.congestion ?? "",
+      info.stops.map((s) => `${s.name}${Math.floor(s.etaSec / 5)}`).join(","),
+    ].join("|");
+    if (key === lastPanelKey) return;
+    lastPanelKey = key;
+
+    popup.hidden = false;
+    popup.innerHTML = `
+      <div class="train-head">
+        <span class="train-badge"></span>
+        <span class="train-dest"></span>
+      </div>
+      <div class="train-status"></div>
+      <div class="train-stops"></div>
+    `;
+
+    const badge = popup.querySelector(".train-badge") as HTMLElement;
+    badge.textContent = info.line;
+    badge.style.background = info.color;
+
+    popup.querySelector(".train-dest")!.textContent = info.destination;
+
+    const statusEl = popup.querySelector(".train-status") as HTMLElement;
+    statusEl.textContent = status;
+    if (info.congestion) {
+      const tag = document.createElement("em");
+      tag.textContent = info.congestion;
+      statusEl.appendChild(tag);
+    }
+
+    const list = popup.querySelector(".train-stops") as HTMLElement;
+    if (info.stops.length === 0) return;
+    list.innerHTML = `<div class="train-stops-head">앞으로 설 역</div>`;
+    for (const stop of info.stops) {
+      const row = document.createElement("div");
+      row.className = "train-stop";
+
+      const dot = document.createElement("span");
+      dot.className = "train-stop-dot";
+      dot.style.background = info.color;
+
+      const name = document.createElement("span");
+      name.className = "train-stop-name";
+      name.textContent = stop.name;
+
+      const eta = document.createElement("span");
+      eta.className = "train-stop-eta";
+      eta.textContent = formatEtaClock(stop.etaSec);
+
+      row.append(dot, name, eta);
+      list.appendChild(row);
+    }
+  };
+
   const loadArrivals = (station: Station) => {
     const host = popup.querySelector("#arrivals") as HTMLElement | null;
     if (!host) return;
@@ -491,9 +570,14 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     setFollow(info: FollowInfo | null) {
       if (!info) {
         if (!follow.hidden) follow.hidden = true;
+        if (lastPanelKey) {
+          popup.hidden = true;
+          lastPanelKey = "";
+        }
         lastFollowKey = "";
         return;
       }
+      renderTrainPanel(info);
       const nextText = info.dwelling
         ? "정차 중"
         : info.next
@@ -545,6 +629,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       popup.querySelector("h2")!.textContent = station.name;
       popup.querySelector(".en")!.textContent = station.nameEn;
       shownStation = station;
+      lastPanelKey = "";
       loadArrivals(station);
       renderFlow(station);
       renderTimetable(station);
@@ -553,6 +638,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       arrivalsAbort?.abort();
       arrivalsAbort = null;
       shownStation = null;
+      lastPanelKey = "";
       popup.hidden = true;
     },
     /** 시간표는 늦게 도착할 수 있다. 팝업이 열려 있으면 다시 그린다. */

@@ -240,6 +240,76 @@ function widestGap(route: PreparedRoute, trains: Train[]): number {
 let routeIndex: Map<string, PreparedRoute> | null = null;
 let indexedRoutes: PreparedRoute[] | null = null;
 
+export type UpcomingStop = {
+  name: string;
+  /** 열차 현재 위치에서의 거리(m). */
+  distance: number;
+  /** 도착까지 걸릴 것으로 보는 시간(초). */
+  etaSec: number;
+};
+
+/**
+ * 한 구간을 달리는 데 걸리는 시간(초).
+ * 가속 → 순항 → 감속으로 나눠 계산한다. 짧은 구간은 최고 속도에 닿기 전에
+ * 감속에 들어가므로 도달 가능한 최고 속도를 따로 구한다.
+ */
+function segmentSeconds(distance: number): number {
+  if (distance <= 0) return 0;
+  const accelDist = (CRUISE * CRUISE) / (2 * ACCEL);
+  const decelDist = (CRUISE * CRUISE) / (2 * DECEL);
+
+  if (distance >= accelDist + decelDist) {
+    const cruise = distance - accelDist - decelDist;
+    return CRUISE / ACCEL + cruise / CRUISE + CRUISE / DECEL;
+  }
+
+  const peak = Math.sqrt((2 * distance * ACCEL * DECEL) / (ACCEL + DECEL));
+  return peak / ACCEL + peak / DECEL;
+}
+
+/**
+ * 앞으로 설 역들과 도착 예정 시간.
+ * 정차 시간과 가감속을 반영한 어림이라 실제 시각표와는 다르다.
+ */
+export function upcomingStops(
+  routes: PreparedRoute[],
+  train: Train,
+  limit = 8,
+): UpcomingStop[] {
+  const route = routes.find((r) => r.id === train.routeId);
+  if (!route) return [];
+
+  const out: UpcomingStop[] = [];
+  let along = train.along;
+  let seconds = train.dwell > 0 ? train.dwell / 1000 : 0;
+  let dir = train.dir;
+
+  for (let i = 0; i < limit; i++) {
+    const target = nextTarget(route, along, dir);
+
+    if (!target.stop) {
+      // 종착이면 방향을 바꿔 계속 센다. 회차 후 첫 역까지 이어서 보여 준다.
+      if (route.loop) break;
+      seconds += segmentSeconds(target.distance) + TURNAROUND / 1000;
+      along = dir === 1 ? route.length : 0;
+      dir = dir === 1 ? -1 : 1;
+      continue;
+    }
+
+    seconds += segmentSeconds(target.distance);
+    out.push({
+      name: target.stop.name,
+      distance: Math.abs(target.stop.along - train.along),
+      etaSec: Math.round(seconds),
+    });
+
+    along = target.stop.along;
+    seconds += DWELL / 1000;
+  }
+
+  return out;
+}
+
 /** 열차가 다음에 설 역 이름. 종착으로 향하는 중이면 빈 문자열. */
 export function nextStationName(
   routes: PreparedRoute[],
