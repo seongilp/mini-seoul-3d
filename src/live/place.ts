@@ -221,6 +221,7 @@ export function placeLiveTrains(
         along,
         dwell: 0,
         lastStop: -1,
+        speed: 0,
         coord: pose.coord,
         heading: pose.heading,
       });

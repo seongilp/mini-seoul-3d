@@ -92,6 +92,15 @@ const hud = mountHud(hudRoot, network, state, {
     map.setStyle(state.night ? STYLES.night : STYLES.day);
   },
   onLayers() {},
+  onNow() {
+    state.clockMs = Date.now();
+    const at = currentHour();
+    if (state.crowd && crowd) {
+      crowd.update(map, at);
+      hud.updateCrowdNote(at);
+    }
+    hud.setFlowHour(at);
+  },
   onScrub(hour) {
     // 슬라이더로 옮긴 시각을 시뮬레이션 시계에 반영한다.
     const d = new Date(state.clockMs);

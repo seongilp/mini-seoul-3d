@@ -27,7 +27,22 @@ export type HudHandlers = {
   onCrowd: () => void;
   /** 시간 슬라이더를 끌었을 때. hour 는 0~24 소수. */
   onScrub: (hour: number) => void;
+  /** 시계를 실제 현재 시각으로 되돌릴 때. */
+  onNow: () => void;
 };
+
+/** 서울 기준 현재 시각을 자정 기준 분으로. */
+function seoulMinutesNow(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return (get("hour") % 24) * 60 + get("minute");
+}
 
 /** 자정 기준 분 → "08:35". */
 function formatMinutes(minutes: number): string {
@@ -69,6 +84,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       <span class="timebar-label" id="timebar-label">--:--</span>
       <input id="timebar-range" type="range" min="0" max="1439" step="1" value="0"
              aria-label="시각" />
+      <button id="timebar-now" class="timebar-now" hidden>지금</button>
       <span class="timebar-hint" id="timebar-hint"></span>
     </div>
     <div class="status" id="status"></div>
@@ -91,6 +107,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const timeRange = root.querySelector("#timebar-range") as HTMLInputElement;
   const timeLabel = root.querySelector("#timebar-label") as HTMLElement;
   const timeHint = root.querySelector("#timebar-hint") as HTMLElement;
+  const nowBtn = root.querySelector("#timebar-now") as HTMLButtonElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -170,6 +187,10 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     handlers.onScrub(minutes / 60);
   });
   timeRange.addEventListener("change", endScrub);
+  nowBtn.addEventListener("click", () => {
+    scrubbing = false;
+    handlers.onNow();
+  });
   root.querySelector("#btn-layers")!.addEventListener("click", () => {
     legend.hidden = !legend.hidden;
     handlers.onLayers();
@@ -199,6 +220,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   let crowdNote = "";
   let lastTimeValue = -1;
   let lastFollowKey = "";
+  let nowVisible = false;
   let crowdBucket = -1;
   /** 팝업 그래프가 가리키는 시각. 시계·슬라이더를 따라 움직인다. */
   let flowHour = 0;
@@ -368,6 +390,20 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
           timeRange.value = String(minutes);
           timeLabel.textContent = formatMinutes(minutes);
         }
+      }
+
+      // 실제 시각과 2분 넘게 벌어지면 되돌릴 수단을 보여 준다.
+      const realMinutes = seoulMinutesNow();
+      const shown = Number(timeRange.value);
+      const drifted = Math.min(
+        Math.abs(shown - realMinutes),
+        24 * 60 - Math.abs(shown - realMinutes),
+      );
+      const showNow = !timeRange.disabled && drifted > 2;
+      if (showNow !== nowVisible) {
+        nowVisible = showNow;
+        nowBtn.hidden = !showNow;
+        timeHint.hidden = showNow;
       }
       const sec = Math.floor(now.getTime() / 1000);
       if (sec !== lastClockSec) {
