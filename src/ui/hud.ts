@@ -68,6 +68,96 @@ function formatMinutes(minutes: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
+/**
+ * 오른쪽 툴바. 아이콘만으로는 무엇인지 알기 어려워서 이름과 설명을 함께 둔다.
+ * 도움말 팔레트도 이 목록을 그대로 쓴다.
+ */
+const TOOLBAR = [
+  { id: "btn-search-focus", icon: "⌕", name: "역 검색", desc: "역 이름으로 찾아 이동합니다" },
+  { id: "btn-night", icon: "☾", name: "야간", desc: "어두운 지도로 바꿉니다" },
+  { id: "btn-under", icon: "地下", name: "지하", desc: "건물을 낮춰 지하 구간이 드러납니다" },
+  { id: "btn-play", icon: "×1", name: "배속", desc: "시간이 흐르는 속도 ×1 → ×5 → ×15" },
+  { id: "btn-eco", icon: "ECO", name: "절전", desc: "열차 수와 갱신을 줄여 가볍게 돌립니다" },
+  {
+    id: "btn-live",
+    icon: "LIVE",
+    name: "실시간",
+    desc: "서울시 실시간 위치로 실제 열차를 띄웁니다",
+  },
+  {
+    id: "btn-crowd",
+    icon: "人",
+    name: "사람",
+    desc: "역별 승하차를 기둥으로, 열차를 혼잡도 색으로",
+  },
+  { id: "btn-layers", icon: "≡", name: "노선", desc: "노선을 하나씩 켜고 끕니다" },
+  { id: "btn-full", icon: "⛶", name: "전체화면", desc: "브라우저를 전체화면으로" },
+  { id: "btn-help", icon: "?", name: "도움말", desc: "사용법을 봅니다" },
+] as const;
+
+/** 지도 조작과 클릭 동작. 툴바 설명과 함께 도움말에 함께 보여 준다. */
+const HELP_SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
+  {
+    title: "지도",
+    rows: [
+      ["드래그", "지도 이동"],
+      ["휠 · 핀치", "확대 · 축소"],
+      ["우클릭 드래그", "회전과 기울이기"],
+      ["N 버튼", "북쪽으로 되돌리기"],
+    ],
+  },
+  {
+    title: "클릭",
+    rows: [
+      ["역", "도착정보 · 시간대별 승하차 · 첫차와 막차"],
+      ["열차", "카메라가 따라가고 앞으로 설 역을 보여 줍니다"],
+      ["Esc", "따라가기 해제"],
+    ],
+  },
+  {
+    title: "시간",
+    rows: [
+      ["아래 슬라이더", "끌면 그 시각의 열차와 승하차로 바뀝니다"],
+      ["지금", "실제 현재 시각으로 되돌리기"],
+      ["배속", "가만히 두면 시간이 흐릅니다"],
+    ],
+  },
+];
+
+function renderHelp(): string {
+  const escape = (v: string) =>
+    v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
+
+  const buttons = TOOLBAR.map(
+    (b) =>
+      `<div class="help-row"><span class="help-key">${escape(b.icon)}</span>
+       <span class="help-name">${escape(b.name)}</span>
+       <span class="help-desc">${escape(b.desc)}</span></div>`,
+  ).join("");
+
+  const sections = HELP_SECTIONS.map(
+    (s) => `<div class="help-section">
+      <div class="help-title">${escape(s.title)}</div>
+      ${s.rows
+        .map(
+          ([k, v]) =>
+            `<div class="help-row"><span class="help-key is-text">${escape(k)}</span>
+             <span class="help-desc">${escape(v)}</span></div>`,
+        )
+        .join("")}
+    </div>`,
+  ).join("");
+
+  return `${sections}
+    <div class="help-section">
+      <div class="help-title">오른쪽 버튼</div>
+      ${buttons}
+    </div>
+    <div class="help-foot">
+      데이터 · 서울 열린데이터광장 (실시간 위치 · 도착정보 · 시간표 · 시간대별 이용현황)
+    </div>`;
+}
+
 export function mountHud(root: HTMLElement, network: Network, state: SimState, handlers: HudHandlers) {
   root.innerHTML = `
     <div class="clock" id="clock"></div>
@@ -80,16 +170,12 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       <div class="search-list" id="results" hidden></div>
     </div>
     <div class="toolbar">
-      <button id="btn-search-focus" title="역 검색">⌕</button>
-      <button id="btn-night" title="야간">☾</button>
-      <button id="btn-under" title="지하">地下</button>
-      <button id="btn-play" title="재생 속도">×1</button>
-      <button id="btn-eco" title="에코">ECO</button>
-      <button id="btn-live" title="실시간 운행 (서울 열린데이터광장)">LIVE</button>
-      <button id="btn-crowd" title="시간대별 승하차 인원">人</button>
-      <button id="btn-layers" title="노선">≡</button>
-      <button id="btn-full" title="전체화면">⛶</button>
+      ${TOOLBAR.map(
+        (b) =>
+          `<button id="${b.id}" data-tip="${b.name}" data-sub="${b.desc}" aria-label="${b.name}">${b.icon}</button>`,
+      ).join("")}
     </div>
+    <div class="tip" id="tip" hidden></div>
     <div class="zoom-stack">
       <button id="btn-in" title="확대">+</button>
       <button id="btn-out" title="축소">−</button>
@@ -97,6 +183,15 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     </div>
     <aside class="legend" id="legend" hidden></aside>
     <article class="popup" id="popup" hidden></article>
+    <div class="help" id="help" hidden>
+      <div class="help-card" role="dialog" aria-label="사용법">
+        <div class="help-top">
+          <strong>Mini Seoul 3D 사용법</strong>
+          <button id="help-close" aria-label="닫기">✕</button>
+        </div>
+        <div class="help-body" id="help-body"></div>
+      </div>
+    </div>
     <div class="follow" id="follow" hidden></div>
     <div class="timebar" id="timebar">
       <span class="timebar-label" id="timebar-label">--:--</span>
@@ -126,6 +221,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   const timeLabel = root.querySelector("#timebar-label") as HTMLElement;
   const timeHint = root.querySelector("#timebar-hint") as HTMLElement;
   const nowBtn = root.querySelector("#timebar-now") as HTMLButtonElement;
+  const tip = root.querySelector("#tip") as HTMLElement;
+  const help = root.querySelector("#help") as HTMLElement;
 
   const renderLegend = () => {
     legend.innerHTML = `
@@ -214,6 +311,42 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     handlers.onLayers();
   });
   root.querySelector("#btn-search-focus")!.addEventListener("click", () => search.focus());
+
+  /** 아이콘만 보고는 알기 어려우니 마우스를 올리면 이름과 설명을 띄운다. */
+  for (const meta of TOOLBAR) {
+    const button = root.querySelector(`#${meta.id}`) as HTMLButtonElement | null;
+    if (!button) continue;
+    button.addEventListener("pointerenter", () => {
+      tip.hidden = false;
+      tip.innerHTML = `<strong></strong><span></span>`;
+      tip.querySelector("strong")!.textContent = meta.name;
+      tip.querySelector("span")!.textContent = meta.desc;
+      const box = button.getBoundingClientRect();
+      tip.style.top = `${box.top + box.height / 2}px`;
+      tip.style.right = `${window.innerWidth - box.left + 10}px`;
+    });
+    button.addEventListener("pointerleave", () => {
+      tip.hidden = true;
+    });
+  }
+
+  const helpBody = root.querySelector("#help-body") as HTMLElement;
+  const setHelp = (open: boolean) => {
+    help.hidden = !open;
+    if (open) tip.hidden = true;
+  };
+  helpBody.innerHTML = renderHelp();
+  root.querySelector("#btn-help")!.addEventListener("click", () => setHelp(help.hidden));
+  root.querySelector("#help-close")!.addEventListener("click", () => setHelp(false));
+  help.addEventListener("click", (e) => {
+    // 카드 바깥을 누르면 닫는다.
+    if (e.target === help) setHelp(false);
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !help.hidden) setHelp(false);
+    // 입력 중이 아닐 때만 ? 로 연다.
+    if (e.key === "?" && document.activeElement !== search) setHelp(help.hidden);
+  });
 
   // 서울 지하철 모형이라 시계도 서울 시각으로 보여 준다. 시간표·첫차·막차와
   // 기준이 어긋나지 않게 하려는 것이기도 하다.

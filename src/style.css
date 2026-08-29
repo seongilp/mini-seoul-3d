@@ -839,3 +839,166 @@ body {
   margin-left: auto;
   flex: none;
 }
+
+/* 툴바 버튼 설명. 툴바가 오른쪽 끝에 붙어 있어 왼쪽으로 띄운다. */
+.tip {
+  position: fixed;
+  transform: translateY(-50%);
+  max-width: 230px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tip span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.help {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 10, 8, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.help[hidden] {
+  display: none;
+}
+
+.help-card {
+  width: min(560px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba(24, 22, 18, 0.96);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.help-top {
+  display: flex;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.help-top strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.help-top button {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: rgba(246, 240, 228, 0.12);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font: 600 12px/1 inherit;
+}
+
+.help-top button:hover {
+  background: rgba(246, 240, 228, 0.22);
+}
+
+.help-body {
+  padding: 6px 18px 16px;
+  overflow-y: auto;
+}
+
+.help-section {
+  margin-top: 14px;
+}
+
+.help-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.help-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.help-key {
+  flex: none;
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 7px;
+  background: rgba(246, 240, 228, 0.13);
+  border: 1px solid var(--panel-border);
+}
+
+.help-key.is-text {
+  min-width: 92px;
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+.help-name {
+  flex: none;
+  min-width: 58px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.help-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.help-foot {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .tip {
+    display: none;
+  }
+
+  .help-name {
+    min-width: 0;
+  }
+}
