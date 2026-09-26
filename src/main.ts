@@ -1,6 +1,7 @@
 import "./style.css";
 import { createMap, restyleBase, setUnderground, STYLES } from "./map/createMap";
 import { addTransitLayers } from "./map/layers";
+import { StationLabels } from "./map/stationLabels";
 import { CrowdLayer } from "./map/crowd";
 import { StationFocus } from "./map/focus";
 import {
@@ -73,7 +74,8 @@ const hud = mountHud(hudRoot, network, state, {
   onToggleLine(id) {
     if (state.hiddenLines.has(id)) state.hiddenLines.delete(id);
     else state.hiddenLines.add(id);
-    addTransitLayers(map, network, state.hiddenLines, state.night);
+    addTransitLayers(map, network, state.hiddenLines);
+    stationLabels.setHiddenLines(state.hiddenLines);
     trains = seedTrains(routes, state, timetable);
     hud.renderLegend();
   },
@@ -241,7 +243,7 @@ function showFatal(message: string) {
 function paintOverlay() {
   try {
     restyleBase(map, state.night);
-    addTransitLayers(map, network, state.hiddenLines, state.night);
+    addTransitLayers(map, network, state.hiddenLines);
   } catch (error) {
     console.error("overlay failed", error);
     return;
@@ -369,6 +371,14 @@ void loadTimetable().then((loaded) => {
 });
 
 map.on("style.load", paintOverlay);
+
+const stationLabels = new StationLabels(
+  map.getContainer(),
+  network.stations,
+  focusStation,
+  "#hud .brand, #hud .search, #hud .toolbar, #hud .zoom-stack, #hud .timebar, #hud .popup, #hud .legend, #hud .crowd-legend, #hud .follow",
+);
+stationLabels.attach(map);
 if (map.isStyleLoaded()) paintOverlay();
 
 map.on("load", hideLoader);
