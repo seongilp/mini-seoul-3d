@@ -34,6 +34,7 @@ export type HudHandlers = {
   onLayers: () => void;
   onLive: () => void;
   onCrowd: () => void;
+  onLastTrain: () => void;
   /** 시간 슬라이더를 끌었을 때. hour 는 0~24 소수. */
   onScrub: (hour: number) => void;
   /** 시계를 실제 현재 시각으로 되돌릴 때. */
@@ -143,6 +144,14 @@ const TOOLBAR: ReadonlyArray<{
     group: 3,
   },
   {
+    id: "btn-last",
+    icon: "막차",
+    name: "막차",
+    desc: "노선별 막차 시각을 보고, 막차가 지난 구간을 어둡게 합니다",
+    group: 3,
+    variant: "text",
+  },
+  {
     id: "btn-layers",
     icon: "≡",
     svg: svg('<path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>'),
@@ -176,12 +185,24 @@ function renderToolbar(): string {
   }).join("");
 }
 
+/** 시간 막대가 보여 주는 범위(자정 기준 분). 막차 보기에서는 자정을 넘겨 이어진다. */
+export type TimeWindow = { from: number; to: number; step: number };
+
+/** 평소 범위. 하루 전체를 3시간 간격 눈금으로. */
+const DAY_WINDOW: TimeWindow = { from: 0, to: 1439, step: 180 };
+
 /** 슬라이더 아래 시각 눈금. 엄지 폭만큼 안쪽으로 들여 슬라이더 위치와 맞춘다. */
-function renderTicks(): string {
+function renderTicks(w: TimeWindow): string {
   const ticks: string[] = [];
-  for (let h = 0; h <= 24; h += 3) {
+  const span = w.to - w.from;
+  for (let m = w.from; m <= w.to + 1; m += w.step) {
+    const ratio = Math.min(1, (m - w.from) / span);
+    const hour = Math.floor(m / 60) % 24;
+    // 하루 전체를 볼 때 끝 눈금은 24 로 적어야 처음 00 과 헷갈리지 않는다.
+    // 자정을 넘기는 막대에서는 자정이 가운데 있으니 00 으로 적는다.
+    const label = w === DAY_WINDOW && m >= 1440 ? 24 : hour;
     ticks.push(
-      `<span style="left:calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${h / 24})">${String(h).padStart(2, "0")}</span>`,
+      `<span style="left:calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${ratio})">${String(label).padStart(2, "0")}</span>`,
     );
   }
   return ticks.join("");
@@ -333,7 +354,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       <div class="timebar-track">
         <input id="timebar-range" type="range" min="0" max="1439" step="1" value="0"
                aria-label="시각" />
-        <div class="timebar-ticks" aria-hidden="true">${renderTicks()}</div>
+        <div class="timebar-ticks" aria-hidden="true">${renderTicks(DAY_WINDOW)}</div>
         <div class="status" id="status"></div>
       </div>
       <div class="timebar-side">
@@ -424,12 +445,19 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   night.addEventListener("click", handlers.onNight);
   live.addEventListener("click", handlers.onLive);
   crowdBtn.addEventListener("click", handlers.onCrowd);
+  const lastBtn = root.querySelector("#btn-last") as HTMLButtonElement;
+  lastBtn.addEventListener("click", handlers.onLastTrain);
 
   /** 슬라이더에서 지나온 구간을 채워 하루 중 어디쯤인지 보이게 한다. */
   const paintProgress = () => {
-    const ratio = Number(timeRange.value) / Number(timeRange.max);
+    const min = Number(timeRange.min);
+    const ratio = (Number(timeRange.value) - min) / (Number(timeRange.max) - min);
     timeRange.style.setProperty("--p", `${(ratio * 100).toFixed(2)}%`);
   };
+
+  /** 지금 시간 막대 범위. */
+  let window_: TimeWindow = DAY_WINDOW;
+  const ticksEl = root.querySelector(".timebar-ticks") as HTMLElement;
 
   /** 끄는 동안에는 시계가 슬라이더를 덮어쓰지 않게 한다. */
   let scrubbing = false;
@@ -759,7 +787,10 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     tick(now: Date, trainCount: number) {
       // 끄는 중에는 사용자의 손이 우선이다.
       if (!scrubbing) {
-        const minutes = now.getHours() * 60 + now.getMinutes();
+        let minutes = now.getHours() * 60 + now.getMinutes();
+        // 자정을 넘기는 범위에서는 새벽을 24시 이후로 이어 적는다.
+        if (window_.to >= 1440 && minutes < window_.to - 1440 + 60) minutes += 1440;
+        minutes = Math.max(window_.from, Math.min(window_.to, minutes));
         if (minutes !== lastTimeValue) {
           lastTimeValue = minutes;
           timeRange.value = String(minutes);
@@ -771,10 +802,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       // 실제 시각과 2분 넘게 벌어지면 되돌릴 수단을 보여 준다.
       const realMinutes = seoulMinutesNow();
       const shown = Number(timeRange.value);
-      const drifted = Math.min(
-        Math.abs(shown - realMinutes),
-        24 * 60 - Math.abs(shown - realMinutes),
-      );
+      const diff = (((shown - realMinutes) % 1440) + 1440) % 1440;
+      const drifted = Math.min(diff, 1440 - diff);
       const showNow = !timeRange.disabled && drifted > 2;
       if (showNow !== nowVisible) {
         nowVisible = showNow;
@@ -897,6 +926,17 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       const cong = follow.querySelector(".follow-cong") as HTMLElement;
       cong.textContent = info.congestion ?? "";
       cong.hidden = !info.congestion;
+    },
+    /** 시간 막대 범위를 바꾼다. null 이면 하루 전체로 되돌린다. */
+    setTimeWindow(next: TimeWindow | null) {
+      window_ = next ?? DAY_WINDOW;
+      timeRange.min = String(window_.from);
+      timeRange.max = String(window_.to);
+      ticksEl.innerHTML = renderTicks(window_);
+      lastTimeValue = -1;
+    },
+    setLastTrain(on: boolean) {
+      lastBtn.setAttribute("aria-pressed", String(on));
     },
     setLive(on: boolean, note: string) {
       live.setAttribute("aria-pressed", String(on));

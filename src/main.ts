@@ -26,7 +26,10 @@ import type { Network, SimState, Station } from "./types";
 import { loadCongestionData } from "./data/congestion-data";
 import { loadRidership } from "./data/ridership";
 import { loadRunTimes } from "./data/runtimes";
-import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
+import { dayTypeOf, loadTimetable, nowMinutes, seoulTime, type Timetable } from "./data/timetable";
+import { lastRunSegments, lineLastTrains } from "./data/lastTrain";
+import { setLastRun, setLastRunTime } from "./map/lastRun";
+import { mountLastTrainPanel } from "./ui/lastTrainPanel";
 import { createLiveController, type LiveStatus } from "./live/controller";
 import { LiveFleet } from "./live/interpolate";
 import { LIVE_LINES, type LiveLine } from "./live/lines";
@@ -114,9 +117,15 @@ const hud = mountHud(hudRoot, network, state, {
   },
   onScrub(hour) {
     // 슬라이더로 옮긴 시각을 시뮬레이션 시계에 반영한다.
-    const d = new Date(state.clockMs);
-    d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
-    state.clockMs = d.getTime();
+    if (lastTrain.on) {
+      // 막차 보기의 막대는 자정을 넘긴다(24시 이후 = 다음날 새벽). 운행일 0시를
+      // 기준으로 더해야 23시와 01시를 오갈 때 날짜가 꼬이지 않는다.
+      state.clockMs = serviceDayStart(state.clockMs) + hour * 3600_000;
+    } else {
+      const d = new Date(state.clockMs);
+      d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+      state.clockMs = d.getTime();
+    }
     syncToClock();
   },
   onCrowd() {
@@ -127,18 +136,27 @@ const hud = mountHud(hudRoot, network, state, {
     hud.setCrowd(state.crowd);
   },
   onLive() {
-    state.live = !state.live;
-    hud.setScrubEnabled(!state.live, state.live ? "실시간" : "시각을 끌어 보세요");
-    if (state.live) {
-      state.speed = 1; // 실시간에서는 배속이 의미가 없다.
-      liveTrains.start();
-    } else {
-      liveTrains.stop();
-      liveFleet.clear();
-      trains = seedTrains(routes, state, timetable);
-    }
+    setLiveMode(!state.live);
+  },
+  onLastTrain() {
+    toggleLastTrain();
   },
 });
+
+/** 실시간과 시뮬레이션을 오간다. 막차 보기도 시각을 끌기 위해 이것을 쓴다. */
+function setLiveMode(on: boolean) {
+  if (state.live === on) return;
+  state.live = on;
+  hud.setScrubEnabled(!state.live, state.live ? "실시간" : "시각을 끌어 보세요");
+  if (state.live) {
+    state.speed = 1; // 실시간에서는 배속이 의미가 없다.
+    liveTrains.start();
+  } else {
+    liveTrains.stop();
+    liveFleet.clear();
+    trains = seedTrains(routes, state, timetable);
+  }
+}
 
 /** ?debug 를 붙이면 배치 실패·노선 지연 같은 진단 정보를 상태줄에 표시한다. */
 const DEBUG = new URLSearchParams(location.search).has("debug");
@@ -268,6 +286,8 @@ function paintOverlay() {
   } catch (error) {
     console.error("crowd failed", error);
   }
+  // 스타일을 다시 불러오면 막차 레이어도 사라진다. 켜져 있었으면 다시 올린다.
+  if (lastTrain.on) refreshLastTrain(true);
 }
 
 /**
@@ -373,16 +393,112 @@ void loadRunTimes().then(setRunTimes);
 void loadTimetable().then((loaded) => {
   timetable = loaded;
   hud.setTimetable(loaded);
+  if (lastTrain.on) refreshLastTrain(true);
   if (!state.live) trains = seedTrains(routes, state, timetable);
 });
 
 map.on("style.load", paintOverlay);
 
+/* ── 막차 보기 ───────────────────────────────────── */
+
+const DAY_LABEL = { weekday: "평일 시간표", saturday: "토요일 시간표", holiday: "휴일 시간표" } as const;
+/** 막차 보기의 시간 막대. 밤 9시부터 새벽 2시까지, 한 시간 눈금. */
+const LAST_TRAIN_WINDOW = { from: 21 * 60, to: 26 * 60, step: 60 };
+
+/** 운행일 0시. 새벽 4시 전은 전날 운행일이다. */
+function serviceDayStart(ms: number): number {
+  const d = new Date(ms);
+  if (d.getHours() < 4) d.setDate(d.getDate() - 1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** 낮에는 꺼질 구간이 없어 볼 것이 없다. 참고한 도쿄 막차 지도처럼 밤 11시 반에서 시작한다. */
+const LAST_TRAIN_START = { hour: 23, minute: 30 };
+
+const lastTrain = {
+  on: false,
+  /** 켜기 전에 실시간이었는지. 끌 때 되돌린다. */
+  restoreLive: false,
+  data: null as GeoJSON.FeatureCollection | null,
+  /** 구간 데이터를 만든 요일·시간표 상태. 바뀌면 다시 만든다. */
+  key: "",
+  minute: -1,
+};
+
+const lastTrainPanel = mountLastTrainPanel(hudRoot, network, () => {
+  if (lastTrain.on) toggleLastTrain();
+});
+
+/**
+ * 막차 보기의 "지금" (운행일 기준 분).
+ * 새벽 4~5시는 첫차 전이라 전날 운행이 모두 끝난 것으로 본다.
+ */
+function lastTrainNow(at: Date): number {
+  const minutes = nowMinutes(at);
+  return minutes < 5 * 60 ? minutes + 24 * 60 : minutes;
+}
+
+function toggleLastTrain() {
+  lastTrain.on = !lastTrain.on;
+  hud.setLastTrain(lastTrain.on);
+  hud.setTimeWindow(lastTrain.on ? LAST_TRAIN_WINDOW : null);
+  lastTrainPanel.setOpen(lastTrain.on);
+
+  if (lastTrain.on) {
+    // 시각을 끌어 볼 수 있어야 막차 보기가 산다. 실시간은 잠시 내려 둔다.
+    lastTrain.restoreLive = state.live;
+    setLiveMode(false);
+    // 막대 범위(21시~새벽 2시) 밖이면 볼 것이 없으니 밤 11시 반으로 옮긴다.
+    const now = nowMinutes(new Date(state.clockMs));
+    if (now < LAST_TRAIN_WINDOW.from || now > LAST_TRAIN_WINDOW.to) {
+      state.clockMs =
+        serviceDayStart(state.clockMs) +
+        (LAST_TRAIN_START.hour * 60 + LAST_TRAIN_START.minute) * 60_000;
+      syncToClock();
+    }
+  } else if (lastTrain.restoreLive) {
+    setLiveMode(true);
+  }
+  refreshLastTrain(true);
+}
+
+/**
+ * 시간표 요일을 고를 때 쓰는 날짜. 자정을 넘긴 새벽은 전날 운행의 연장이라
+ * 토요일 밤 00:10 은 일요일(휴일)이 아니라 토요일 시간표를 따라야 한다.
+ * 운행일이 바뀌는 새벽 4시만큼 당겨서 날짜만 쓴다.
+ */
+function serviceDate(at: Date): Date {
+  return new Date(at.getTime() - 4 * 3600_000);
+}
+
+/** 시각이 분 단위로 바뀔 때만 지도와 패널을 고친다. force 면 무조건. */
+function refreshLastTrain(force: boolean) {
+  const now = state.live ? new Date() : new Date(state.clockMs);
+  const minute = lastTrainNow(now);
+  const at = serviceDate(now);
+  const key = `${dayTypeOf(at)}|${timetable ? "tt" : "none"}`;
+  if (!force && minute === lastTrain.minute && key === lastTrain.key) return;
+
+  const rebuild = lastTrain.on && (force || key !== lastTrain.key || !lastTrain.data);
+  if (rebuild) lastTrain.data = lastRunSegments(network, timetable, at);
+  lastTrain.key = key;
+  lastTrain.minute = minute;
+
+  if (styleReady) {
+    if (rebuild || !lastTrain.on) setLastRun(map, lastTrain.on, lastTrain.data, minute);
+    else setLastRunTime(map, minute);
+  }
+  if (lastTrain.on) {
+    lastTrainPanel.update(lineLastTrains(network, timetable, at), minute, DAY_LABEL[dayTypeOf(at)]);
+  }
+}
+
 const stationLabels = new StationLabels(
   map.getContainer(),
   network.stations,
   focusStation,
-  "#hud .brand, #hud .search, #hud .toolbar, #hud .zoom-stack, #hud .timebar, #hud .popup, #hud .legend, #hud .crowd-legend, #hud .follow",
+  "#hud .brand, #hud .search, #hud .toolbar, #hud .zoom-stack, #hud .timebar, #hud .popup, #hud .legend, #hud .crowd-legend, #hud .follow, #hud .lastrun",
 );
 stationLabels.attach(map);
 if (map.isStyleLoaded()) paintOverlay();
@@ -552,6 +668,7 @@ function frame(now: number) {
   }
 
   hud.tick(state.live ? new Date() : new Date(state.clockMs), trains.length);
+  if (lastTrain.on) refreshLastTrain(false);
   requestAnimationFrame(frame);
 }
 
