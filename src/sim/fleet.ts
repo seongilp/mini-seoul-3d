@@ -1,3 +1,4 @@
+import type { RunTimes } from "../data/runtimes";
 import type { Timetable } from "../data/timetable";
 import { cumulative, pointAlong } from "../geo";
 import type { LineInfo, Network, Route, RouteStation, SimState } from "../types";
@@ -25,6 +26,13 @@ export type Train = {
    * 이 값이 그대로면 같은 보고가 반복되는 것이므로 위치를 끌어당기지 않는다.
    */
   reportKey?: string;
+  /**
+   * 이번 구간의 순항 속도(m/s). 시간표 운행 시간에 맞춰 구간마다 다시 정한다.
+   * 없으면 기본 순항 속도로 달린다.
+   */
+  cruise?: number;
+  /** cruise 를 정한 구간의 도착역 id. 바뀌면 다시 계산한다. */
+  segmentTo?: string;
 };
 
 export type PreparedRoute = Route & {
@@ -35,13 +43,23 @@ export type PreparedRoute = Route & {
   headway: number;
 };
 
-/** 최고 주행 속도(m/s). 약 56km/h. */
+/** 시간표가 없는 구간의 순항 속도(m/s). 약 56km/h. */
 const CRUISE = 15.5;
+/**
+ * 순항 속도 상한(m/s). 약 108km/h. 공항철도처럼 빠른 노선도 여기를 넘지 않는다.
+ * 실시간 보정이 끌어올릴 수 있는 한도도 이 값이다.
+ */
+export const MAX_SPEED = 30;
+/** 순항 속도 하한(m/s). 시간표가 넉넉한 구간도 이보다는 빨리 달린다. */
+const MIN_CRUISE = 4;
 /** 가속·감속도(m/s^2). 실제 전동차와 비슷한 값이라 역 진입·출발이 자연스럽다. */
 const ACCEL = 0.9;
 const DECEL = 1.0;
-/** 정차 시간(ms). */
+/** 시간표가 없는 역의 정차 시간(ms). */
 const DWELL = 22000;
+/** 시간표 정차 시간은 30초 단위라 짧거나 긴 값은 이 범위로 누른다(초). */
+const DWELL_MIN_SEC = 15;
+const DWELL_MAX_SEC = 60;
 /** 종착역 회차 정차 시간(ms). */
 const TURNAROUND = 30000;
 /** 이 거리(m) 안에 들어오면 도착으로 본다. */
@@ -242,6 +260,13 @@ function widestGap(route: PreparedRoute, trains: Train[]): number {
   return best;
 }
 
+/** 구간 운행 시간. 도착하면 main 이 넣어 준다. */
+let runTimes: RunTimes | null = null;
+
+export function setRunTimes(next: RunTimes | null): void {
+  runTimes = next;
+}
+
 let routeIndex: Map<string, PreparedRoute> | null = null;
 let indexedRoutes: PreparedRoute[] | null = null;
 
@@ -258,18 +283,77 @@ export type UpcomingStop = {
  * 가속 → 순항 → 감속으로 나눠 계산한다. 짧은 구간은 최고 속도에 닿기 전에
  * 감속에 들어가므로 도달 가능한 최고 속도를 따로 구한다.
  */
-function segmentSeconds(distance: number): number {
+function segmentSeconds(distance: number, cruise = CRUISE): number {
   if (distance <= 0) return 0;
-  const accelDist = (CRUISE * CRUISE) / (2 * ACCEL);
-  const decelDist = (CRUISE * CRUISE) / (2 * DECEL);
+  const accelDist = (cruise * cruise) / (2 * ACCEL);
+  const decelDist = (cruise * cruise) / (2 * DECEL);
 
   if (distance >= accelDist + decelDist) {
-    const cruise = distance - accelDist - decelDist;
-    return CRUISE / ACCEL + cruise / CRUISE + CRUISE / DECEL;
+    const flat = distance - accelDist - decelDist;
+    return cruise / ACCEL + flat / cruise + cruise / DECEL;
   }
 
   const peak = Math.sqrt((2 * distance * ACCEL * DECEL) / (ACCEL + DECEL));
   return peak / ACCEL + peak / DECEL;
+}
+
+/**
+ * 주어진 시간 안에 거리를 달리려면 몇 m/s 로 순항해야 하는지.
+ *
+ * 가속 → 순항 → 감속에 걸리는 시간은 T = D/v + k·v (k = 1/2a + 1/2b) 이다.
+ * 이것을 v 에 대해 풀면 두 근이 나오는데, 작은 근이 가감속 거리가 구간 안에
+ * 들어가는 쪽이다. 시간이 너무 빠듯해 풀리지 않으면 낼 수 있는 가장 빠른 속도.
+ */
+function cruiseForTime(distance: number, seconds: number): number {
+  const k = 1 / (2 * ACCEL) + 1 / (2 * DECEL);
+  const disc = seconds * seconds - 4 * k * distance;
+  const v = disc < 0 ? Math.sqrt(distance / k) : (seconds - Math.sqrt(disc)) / (2 * k);
+  return Math.min(MAX_SPEED, Math.max(MIN_CRUISE, v));
+}
+
+/** 진행 방향으로 from 에서 to 까지 거리. 순환선은 한 바퀴를 넘지 않게 감는다. */
+function forwardGap(route: PreparedRoute, from: number, to: number, dir: 1 | -1): number {
+  const d = (to - from) * dir;
+  return route.loop ? ((d % route.length) + route.length) % route.length : Math.abs(d);
+}
+
+/** 시간표에 있는 구간 운행 시간(초). 없으면 null. */
+function scheduledRun(route: PreparedRoute, from: RouteStation, to: RouteStation): number | null {
+  return runTimes?.run(route.line, from.id, to.id) ?? null;
+}
+
+/** 그 역에 설 시간(ms). 시간표에 없으면 기본값. */
+function dwellAt(route: PreparedRoute, stop: RouteStation): number {
+  const sec = runTimes?.dwell(route.line, stop.id);
+  if (sec === null || sec === undefined) return DWELL;
+  return Math.min(DWELL_MAX_SEC, Math.max(DWELL_MIN_SEC, sec)) * 1000;
+}
+
+/**
+ * 열차 뒤쪽(지나온 쪽)에서 가장 가까운 역. 지금 서 있는 역도 포함한다.
+ * 막 출발한 열차의 "출발역" 을 찾는 데 쓴다.
+ */
+function stopBehind(route: PreparedRoute, along: number, dir: 1 | -1): RouteStation | null {
+  let best: RouteStation | null = null;
+  let bestD = Infinity;
+  for (const stop of route.stations) {
+    let d = (along - stop.along) * dir;
+    if (route.loop) d = ((d % route.length) + route.length) % route.length;
+    if (d > -0.05 && d < bestD) {
+      best = stop;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** 이번 구간을 시간표대로 달리려면 필요한 순항 속도. 시간표가 없으면 기본값. */
+function segmentCruise(route: PreparedRoute, train: Train, to: RouteStation): number {
+  const from = stopBehind(route, train.along, train.dir);
+  if (!from || from.id === to.id) return CRUISE;
+  const seconds = scheduledRun(route, from, to);
+  if (seconds === null) return CRUISE;
+  return cruiseForTime(forwardGap(route, from.along, to.along, train.dir), seconds);
 }
 
 /**
@@ -288,6 +372,7 @@ export function upcomingStops(
   let along = train.along;
   let seconds = train.dwell > 0 ? train.dwell / 1000 : 0;
   let dir = train.dir;
+  let from = stopBehind(route, along, dir);
 
   for (let i = 0; i < limit; i++) {
     const target = nextTarget(route, along, dir);
@@ -298,10 +383,18 @@ export function upcomingStops(
       seconds += segmentSeconds(target.distance) + TURNAROUND / 1000;
       along = dir === 1 ? route.length : 0;
       dir = dir === 1 ? -1 : 1;
+      from = stopBehind(route, along, dir);
       continue;
     }
 
-    seconds += segmentSeconds(target.distance);
+    // 시간표 구간 시간은 출발역부터 잰 값이다. 열차가 구간 중간에 있으면
+    // 남은 거리 비율만큼만 센다.
+    const full = from ? scheduledRun(route, from, target.stop) : null;
+    const span = from ? forwardGap(route, from.along, target.stop.along, dir) : 0;
+    seconds +=
+      full !== null && span > 0
+        ? full * Math.min(1, target.distance / span)
+        : segmentSeconds(target.distance);
     out.push({
       name: target.stop.name,
       distance: Math.abs(target.stop.along - train.along),
@@ -309,7 +402,8 @@ export function upcomingStops(
     });
 
     along = target.stop.along;
-    seconds += DWELL / 1000;
+    from = target.stop;
+    seconds += dwellAt(route, target.stop) / 1000;
   }
 
   return out;
@@ -330,7 +424,7 @@ export function nextStationName(
 /** 진행 방향으로 가장 가까운 다음 정차 지점. 종착역이면 stop 이 null 이다. */
 type Target = { stop: RouteStation | null; distance: number };
 
-function nextTarget(route: PreparedRoute, along: number, dir: 1 | -1): Target {
+export function nextTarget(route: PreparedRoute, along: number, dir: 1 | -1): Target {
   let best: RouteStation | null = null;
   let bestD = Infinity;
 
@@ -388,6 +482,14 @@ export function stepFleet(
 
     const target = nextTarget(route, train.along, train.dir);
 
+    // 새 구간에 들어서면 시간표에 맞는 순항 속도를 정한다.
+    const segmentTo = target.stop?.id ?? "";
+    if (train.segmentTo !== segmentTo) {
+      train.segmentTo = segmentTo;
+      train.cruise = target.stop ? segmentCruise(route, train, target.stop) : CRUISE;
+    }
+    const cruise = train.cruise ?? CRUISE;
+
     // 남은 거리 안에 멈추려면 지금부터 줄여야 하는지 본다.
     const brakingDistance = (train.speed * train.speed) / (2 * DECEL);
     if (target.distance <= brakingDistance) {
@@ -395,8 +497,11 @@ export function stepFleet(
       // 영영 도착하지 못한다. 남은 거리에 맞춰 필요한 만큼 더 줄인다.
       const needed = (train.speed * train.speed) / (2 * Math.max(0.5, target.distance));
       train.speed = Math.max(0, train.speed - Math.max(DECEL, needed) * dt);
+    } else if (train.speed > cruise) {
+      // 앞 구간보다 느린 구간에 들어서면 부드럽게 줄인다.
+      train.speed = Math.max(cruise, train.speed - DECEL * dt);
     } else {
-      train.speed = Math.min(CRUISE, train.speed + ACCEL * dt);
+      train.speed = Math.min(cruise, train.speed + ACCEL * dt);
     }
 
     const moved = train.speed * dt;
@@ -431,7 +536,7 @@ function arrive(train: Train, route: PreparedRoute, target: Target): void {
       return;
     }
 
-    train.dwell = DWELL;
+    train.dwell = dwellAt(route, target.stop);
     return;
   }
 

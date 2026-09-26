@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "data": "node scripts/build-network.mjs",
     "timetable": "node scripts/build-timetable.mjs",
+    "runtimes": "node scripts/build-runtimes.mjs",
     "ridership": "node scripts/build-ridership.mjs",
     "congestion": "node scripts/build-congestion.mjs"
   },

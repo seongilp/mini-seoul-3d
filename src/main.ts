@@ -17,6 +17,7 @@ import {
   prepareRoutes,
   retimeFleet,
   seedTrains,
+  setRunTimes,
   stepFleet,
   upcomingStops,
   type Train,
@@ -24,6 +25,7 @@ import {
 import type { Network, SimState, Station } from "./types";
 import { loadCongestionData } from "./data/congestion-data";
 import { loadRidership } from "./data/ridership";
+import { loadRunTimes } from "./data/runtimes";
 import { loadTimetable, seoulTime, type Timetable } from "./data/timetable";
 import { createLiveController, type LiveStatus } from "./live/controller";
 import { LiveFleet } from "./live/interpolate";
@@ -364,6 +366,10 @@ function applyCongestion(list: Train[], hour: number) {
  * 시뮬레이션 운행 시간대 판정에 쓴다.
  */
 let timetable: Timetable | null = null;
+
+/** 역 사이 운행 시간. 없어도 열차는 가감속 모형으로 달린다. */
+void loadRunTimes().then(setRunTimes);
+
 void loadTimetable().then((loaded) => {
   timetable = loaded;
   hud.setTimetable(loaded);
