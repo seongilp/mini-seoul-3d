@@ -5,6 +5,7 @@ import type {
   Map as MapLibreMap,
 } from "maplibre-gl";
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { pointAlong } from "../geo";
 import { congestionColor } from "../sim/congestion";
 import { headsign, type PreparedRoute, type Train } from "../sim/fleet";
@@ -19,8 +20,32 @@ const CAR_LENGTH_M = 20;
  */
 const CAR_WIDTH = 0.42;
 const CAR_HEIGHT = 0.32;
-/** 칸 사이를 살짝 띄워 편성이 마디로 보이게 한다. */
-const CAR_FILL = 0.86;
+/** 칸 사이를 살짝 띄워 편성이 마디로 보이게 한다. 둥근 끝이 연결부처럼 보인다. */
+const CAR_FILL = 0.93;
+/** 차체 모서리 둥글기(단위 상자 기준). 길이 방향으로는 끝이 둥글게 말린다. */
+const BODY_RADIUS = 0.14;
+/** 창문 띠. 옆면 위쪽에 어두운 유리를 두른다. 폭을 조금 넘겨 옆으로 비어져 나오게 한다. */
+const WINDOW_COLOR = 0x1b2330;
+/** 운전실 앞유리. 창문보다 조금 더 어둡다. */
+const CAB_COLOR = 0x10151d;
+/** 지붕판은 노선 색에 흰색을 이만큼 섞는다. 위에서 볼 때 윗면이 밝게 떠야 입체로 읽힌다. */
+const ROOF_TINT = 0.45;
+
+/** 칸 단위 공간(길이 x, 높이 y 0~1, 폭 z)에서 부품 자리. */
+const localBox = (x: number, y: number, sx: number, sy: number, sz: number) =>
+  new THREE.Matrix4().makeTranslation(x, y, 0).multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
+/** 옆면 위쪽 창문 띠. 끝은 둥근 부분에 걸리지 않게 짧게. */
+const WINDOW_LOCAL = localBox(0, 0.5, 0.78, 0.26, 1.015);
+/** 지붕판. 둥근 모서리 안쪽에 얹어 윗면만 밝힌다. */
+const ROOF_LOCAL = localBox(0, 0.985, 0.74, 0.05, 0.62);
+/** 운전실 앞유리. 칸 끝면에서 살짝 튀어나온다. */
+const CAB_FRONT = localBox(0.492, 0.46, 0.03, 0.34, 0.72);
+const CAB_BACK = localBox(-0.492, 0.46, 0.03, 0.34, 0.72);
+/** 전조등·미등. 앞유리 아래에 가로로 길게. 진행 방향이 한눈에 보인다. */
+const LAMP_FRONT = localBox(0.497, 0.2, 0.02, 0.09, 0.6);
+const LAMP_BACK = localBox(-0.497, 0.2, 0.02, 0.09, 0.6);
+const HEADLIGHT_COLOR = 0xfff4d6;
+const TAILLIGHT_COLOR = 0xff3b30;
 /** 아무리 멀어져도 편성 전체가 이 픽셀 길이보다 짧아 보이지 않게 한다. */
 const MIN_TRAIN_PX = 15;
 /** 차체 폭도 같은 이유로 하한을 둔다. 없으면 멀리서 실처럼 얇아진다. */
@@ -69,6 +94,16 @@ class TrainLayer implements CustomLayerInterface {
   private routes = new Map<string, PreparedRoute>();
   private originMerc = maplibregl.MercatorCoordinate.fromLngLat(ORIGIN, 0);
   private boxes: THREE.InstancedMesh;
+  /** 창문 띠·지붕판·앞유리. 가까이서만 그린다. */
+  private windows: THREE.InstancedMesh;
+  private roofs: THREE.InstancedMesh;
+  private cabs: THREE.InstancedMesh;
+  /** 등은 조명을 받지 않는 재질이라 밤에도 빛나 보인다. */
+  private headlights: THREE.InstancedMesh;
+  private taillights: THREE.InstancedMesh;
+  private white = new THREE.Color(0xffffff);
+  private roofTint = new THREE.Color();
+  private part = new THREE.Matrix4();
   private rotX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
   private local = new THREE.Matrix4();
   private proj = new THREE.Matrix4();
@@ -77,17 +112,38 @@ class TrainLayer implements CustomLayerInterface {
   private bufH = 0;
 
   constructor() {
-    // 단위 상자로 두고 칸마다 길이·폭·높이를 따로 준다.
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    geo.translate(0, 0.5, 0);
-    // 조명을 받는 재질이라야 차체 윗면과 옆면의 밝기가 갈려 상자로 보인다.
+    // 단위 크기로 두고 칸마다 길이·폭·높이를 따로 준다. 바닥이 y=0 에 오게 올린다.
+    const body = new RoundedBoxGeometry(1, 1, 1, 2, BODY_RADIUS);
+    body.translate(0, 0.5, 0);
+    const box = new THREE.BoxGeometry(1, 1, 1);
+    box.translate(0, 0.5, 0);
+
+    // 조명을 받는 재질이라야 차체 윗면과 옆면의 밝기가 갈려 입체로 보인다.
     // MeshBasicMaterial 은 음영이 없어 위에서 보면 납작한 색 조각처럼 읽힌다.
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    mat.toneMapped = false;
-    this.boxes = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES);
-    this.boxes.frustumCulled = false;
-    this.boxes.count = 0;
-    this.scene.add(this.boxes);
+    const lit = (color: number) => {
+      const mat = new THREE.MeshLambertMaterial({ color });
+      mat.toneMapped = false;
+      return mat;
+    };
+    const instanced = (geo: THREE.BufferGeometry, mat: THREE.Material, count: number) => {
+      const mesh = new THREE.InstancedMesh(geo, mat, count);
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      this.scene.add(mesh);
+      return mesh;
+    };
+    this.boxes = instanced(body, lit(0xffffff), MAX_INSTANCES);
+    this.roofs = instanced(box, lit(0xffffff), MAX_INSTANCES);
+    this.windows = instanced(box, lit(WINDOW_COLOR), MAX_INSTANCES);
+    // 편성마다 앞뒤 두 개.
+    this.cabs = instanced(box, lit(CAB_COLOR), MAX_INSTANCES);
+    const glow = (color: number) => {
+      const mat = new THREE.MeshBasicMaterial({ color });
+      mat.toneMapped = false;
+      return mat;
+    };
+    this.headlights = instanced(box, glow(HEADLIGHT_COLOR), MAX_INSTANCES);
+    this.taillights = instanced(box, glow(TAILLIGHT_COLOR), MAX_INSTANCES);
 
     // 위에서 살짝 비스듬히 비춰 윗면이 가장 밝고 옆면이 어둡게 한다.
     // 주변광을 높게 두어 노선 색이 어두워지지 않게 하고, 방향광은 면을
@@ -120,6 +176,11 @@ class TrainLayer implements CustomLayerInterface {
   onRemove(): void {
     this.scene.clear();
     this.boxes.dispose();
+    this.windows.dispose();
+    this.roofs.dispose();
+    this.cabs.dispose();
+    this.headlights.dispose();
+    this.taillights.dispose();
     this.renderer?.dispose();
     this.renderer = null;
     this.map = null;
@@ -171,6 +232,8 @@ class TrainLayer implements CustomLayerInterface {
     // 가까이서는 칸을 나눠 그리고, 멀어지면 한 덩어리로 둔다.
     const detailed = zoom >= CONSIST_ZOOM;
     let n = 0;
+    let nCab = 0;
+    let nLamp = 0;
 
     for (const train of this.trains) {
       if (n >= MAX_INSTANCES) break;
@@ -220,15 +283,49 @@ class TrainLayer implements CustomLayerInterface {
         this.dummy.rotation.set(0, ((90 - heading) * Math.PI) / 180, 0);
         this.dummy.scale.set(segLength * CAR_FILL, height, width);
         this.dummy.updateMatrix();
-        this.boxes.setMatrixAt(n, this.dummy.matrix);
+        const car = this.dummy.matrix;
+        this.boxes.setMatrixAt(n, car);
         this.boxes.setColorAt(n, this.color);
+
+        if (detailed) {
+          // 부품은 칸의 단위 공간에서 자리를 잡고 칸 변환을 그대로 따른다.
+          this.windows.setMatrixAt(n, this.part.multiplyMatrices(car, WINDOW_LOCAL));
+          this.roofs.setMatrixAt(n, this.part.multiplyMatrices(car, ROOF_LOCAL));
+          this.roofTint.copy(this.color).lerp(this.white, ROOF_TINT);
+          this.roofs.setColorAt(n, this.roofTint);
+          // 맨 앞 칸은 앞쪽(+x), 맨 뒤 칸은 뒤쪽(-x)에 운전실이 있다.
+          // 맨 앞 칸이 진행 방향이라 전조등, 맨 뒤 칸은 미등을 켠다.
+          if (c === 0) {
+            this.cabs.setMatrixAt(nCab++, this.part.multiplyMatrices(car, CAB_FRONT));
+            this.headlights.setMatrixAt(nLamp, this.part.multiplyMatrices(car, LAMP_FRONT));
+          }
+          if (c === segments - 1) {
+            this.cabs.setMatrixAt(nCab++, this.part.multiplyMatrices(car, CAB_BACK));
+            this.taillights.setMatrixAt(nLamp, this.part.multiplyMatrices(car, LAMP_BACK));
+            nLamp++;
+          }
+        }
         n++;
       }
     }
 
     this.boxes.count = n;
-    this.boxes.instanceMatrix.needsUpdate = true;
-    if (this.boxes.instanceColor) this.boxes.instanceColor.needsUpdate = true;
+    this.windows.count = detailed ? n : 0;
+    this.roofs.count = detailed ? n : 0;
+    this.cabs.count = nCab;
+    this.headlights.count = nLamp;
+    this.taillights.count = nLamp;
+    for (const mesh of [
+      this.boxes,
+      this.windows,
+      this.roofs,
+      this.cabs,
+      this.headlights,
+      this.taillights,
+    ]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
 }
