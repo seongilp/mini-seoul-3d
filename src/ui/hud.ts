@@ -75,29 +75,53 @@ function formatMinutes(minutes: number): string {
  * 오른쪽 툴바. 아이콘만으로는 무엇인지 알기 어려워서 이름과 설명을 함께 둔다.
  * 도움말 팔레트도 이 목록을 그대로 쓴다.
  */
+/** 툴바 아이콘. 선 굵기와 크기를 맞춘 SVG 라 글꼴에 따라 흔들리지 않는다. */
+const svg = (d: string) =>
+  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+
 const TOOLBAR: ReadonlyArray<{
   id: string;
   icon: string;
+  /** 버튼에 그릴 SVG. 없으면 icon 글자를 그대로 쓴다. */
+  svg?: string;
   name: string;
   desc: string;
-  /** 글자가 들어가는 버튼은 아이콘보다 작게 써야 40px 안에 들어간다. */
+  /** 성격이 같은 버튼끼리 묶어 사이에 구분선을 둔다. */
+  group: number;
+  /** 글자가 들어가는 버튼은 아이콘보다 작게 써야 버튼 안에 들어간다. */
   variant?: "text" | "stack";
 }> = [
-  { id: "btn-search-focus", icon: "⌕", name: "역 검색", desc: "역 이름으로 찾아 이동합니다" },
-  { id: "btn-night", icon: "☾", name: "야간", desc: "어두운 지도로 바꿉니다" },
+  {
+    id: "btn-search-focus",
+    icon: "⌕",
+    svg: svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>'),
+    name: "역 검색",
+    desc: "역 이름으로 찾아 이동합니다",
+    group: 0,
+  },
+  {
+    id: "btn-night",
+    icon: "☾",
+    svg: svg('<path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/>'),
+    name: "야간",
+    desc: "어두운 지도로 바꿉니다",
+    group: 1,
+  },
   {
     id: "btn-under",
     icon: "地下",
     name: "지하",
     desc: "건물을 낮춰 지하 구간이 드러납니다",
+    group: 1,
     variant: "stack",
   },
-  { id: "btn-play", icon: "×1", name: "배속", desc: "시간이 흐르는 속도 ×1 → ×5 → ×15" },
+  { id: "btn-play", icon: "×1", name: "배속", desc: "시간이 흐르는 속도 ×1 → ×5 → ×15", group: 2, variant: "text" },
   {
     id: "btn-eco",
     icon: "ECO",
     name: "절전",
     desc: "열차 수와 갱신을 줄여 가볍게 돌립니다",
+    group: 2,
     variant: "text",
   },
   {
@@ -105,18 +129,63 @@ const TOOLBAR: ReadonlyArray<{
     icon: "LIVE",
     name: "실시간",
     desc: "서울시 실시간 위치로 실제 열차를 띄웁니다",
+    group: 3,
     variant: "text",
   },
   {
     id: "btn-crowd",
     icon: "人",
+    svg: svg(
+      '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20v-1.5A4.5 4.5 0 0 1 7 14h4a4.5 4.5 0 0 1 4.5 4.5V20"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M21.5 20v-1.5a4.5 4.5 0 0 0-3-4.2"/>',
+    ),
     name: "사람",
     desc: "역별 승하차를 기둥으로, 열차를 혼잡도 색으로",
+    group: 3,
   },
-  { id: "btn-layers", icon: "≡", name: "노선", desc: "노선을 하나씩 켜고 끕니다" },
-  { id: "btn-full", icon: "⛶", name: "전체화면", desc: "브라우저를 전체화면으로" },
-  { id: "btn-help", icon: "?", name: "도움말", desc: "사용법을 봅니다" },
+  {
+    id: "btn-layers",
+    icon: "≡",
+    svg: svg('<path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>'),
+    name: "노선",
+    desc: "노선을 하나씩 켜고 끕니다",
+    group: 3,
+  },
+  {
+    id: "btn-full",
+    icon: "⛶",
+    svg: svg('<path d="M8 3.5H5.5a2 2 0 0 0-2 2V8M20.5 8V5.5a2 2 0 0 0-2-2H16M3.5 16v2.5a2 2 0 0 0 2 2H8M16 20.5h2.5a2 2 0 0 0 2-2V16"/>'),
+    name: "전체화면",
+    desc: "브라우저를 전체화면으로",
+    group: 4,
+  },
+  {
+    id: "btn-help",
+    icon: "?",
+    svg: svg('<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.5-2.7 2.5M12 16.8h.01"/>'),
+    name: "도움말",
+    desc: "사용법을 봅니다",
+    group: 4,
+  },
 ];
+
+/** 툴바 버튼을 그룹마다 구분선을 끼워 그린다. */
+function renderToolbar(): string {
+  return TOOLBAR.map((b, i) => {
+    const sep = i > 0 && TOOLBAR[i - 1].group !== b.group ? `<span class="tb-sep"></span>` : "";
+    return `${sep}<button id="${b.id}" class="${b.variant ?? ""}" aria-label="${b.name}">${b.svg ?? b.icon}</button>`;
+  }).join("");
+}
+
+/** 슬라이더 아래 시각 눈금. 엄지 폭만큼 안쪽으로 들여 슬라이더 위치와 맞춘다. */
+function renderTicks(): string {
+  const ticks: string[] = [];
+  for (let h = 0; h <= 24; h += 3) {
+    ticks.push(
+      `<span style="left:calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${h / 24})">${String(h).padStart(2, "0")}</span>`,
+    );
+  }
+  return ticks.join("");
+}
 
 /**
  * 사람 보기 모드의 색 범례.
@@ -186,7 +255,7 @@ function renderHelp(): string {
 
   const buttons = TOOLBAR.map(
     (b) =>
-      `<div class="help-row"><span class="help-key">${escape(b.icon)}</span>
+      `<div class="help-row"><span class="help-key">${b.svg ?? escape(b.icon)}</span>
        <span class="help-name">${escape(b.name)}</span>
        <span class="help-desc">${escape(b.desc)}</span></div>`,
   ).join("");
@@ -218,21 +287,25 @@ function renderHelp(): string {
 
 export function mountHud(root: HTMLElement, network: Network, state: SimState, handlers: HudHandlers) {
   root.innerHTML = `
-    <div class="clock" id="clock"></div>
     <div class="brand">
-      <strong>Mini Seoul 3D</strong>
-      <span>수도권 전철 실시간 모형</span>
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="22" height="22"><circle cx="16" cy="16" r="9.5" fill="none" stroke="#00A84D" stroke-width="5"/></svg>
+      </span>
+      <div class="brand-text">
+        <strong>Mini Seoul 3D</strong>
+        <span>수도권 전철 실시간 모형</span>
+      </div>
+      <div class="brand-stats">
+        <div><b>${network.lines.length}</b><small>노선</small></div>
+        <div><b>${network.stations.length}</b><small>역</small></div>
+      </div>
     </div>
     <div class="search">
+      <span class="search-icon" aria-hidden="true">${svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>')}</span>
       <input id="search" type="search" placeholder="역 검색 — 강남, 홍대입구, Seoul Station" autocomplete="off" />
       <div class="search-list" id="results" hidden></div>
     </div>
-    <div class="toolbar">
-      ${TOOLBAR.map(
-        (b) =>
-          `<button id="${b.id}" class="${b.variant ?? ""}" aria-label="${b.name}">${b.icon}</button>`,
-      ).join("")}
-    </div>
+    <div class="toolbar">${renderToolbar()}</div>
     <div class="tip" id="tip" hidden></div>
     <div class="zoom-stack">
       <button id="btn-in" title="확대">+</button>
@@ -253,13 +326,21 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     <div class="crowd-legend" id="crowd-legend" hidden></div>
     <div class="follow" id="follow" hidden></div>
     <div class="timebar" id="timebar">
-      <span class="timebar-label" id="timebar-label">--:--</span>
-      <input id="timebar-range" type="range" min="0" max="1439" step="1" value="0"
-             aria-label="시각" />
-      <button id="timebar-now" class="timebar-now" hidden>지금</button>
-      <span class="timebar-hint" id="timebar-hint"></span>
+      <div class="timebar-time">
+        <span class="timebar-caption" id="clock"></span>
+        <span class="timebar-label" id="timebar-label">--:--</span>
+      </div>
+      <div class="timebar-track">
+        <input id="timebar-range" type="range" min="0" max="1439" step="1" value="0"
+               aria-label="시각" />
+        <div class="timebar-ticks" aria-hidden="true">${renderTicks()}</div>
+        <div class="status" id="status"></div>
+      </div>
+      <div class="timebar-side">
+        <span class="timebar-hint" id="timebar-hint"></span>
+        <button id="timebar-now" class="timebar-now" hidden>지금</button>
+      </div>
     </div>
-    <div class="status" id="status"></div>
   `;
 
   const clock = root.querySelector("#clock") as HTMLElement;
@@ -344,6 +425,12 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
   live.addEventListener("click", handlers.onLive);
   crowdBtn.addEventListener("click", handlers.onCrowd);
 
+  /** 슬라이더에서 지나온 구간을 채워 하루 중 어디쯤인지 보이게 한다. */
+  const paintProgress = () => {
+    const ratio = Number(timeRange.value) / Number(timeRange.max);
+    timeRange.style.setProperty("--p", `${(ratio * 100).toFixed(2)}%`);
+  };
+
   /** 끄는 동안에는 시계가 슬라이더를 덮어쓰지 않게 한다. */
   let scrubbing = false;
   const endScrub = () => {
@@ -359,6 +446,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
     scrubbing = true;
     const minutes = Number(timeRange.value);
     timeLabel.textContent = formatMinutes(minutes);
+    paintProgress();
     handlers.onScrub(minutes / 60);
   });
   timeRange.addEventListener("change", endScrub);
@@ -410,15 +498,11 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
 
   // 서울 지하철 모형이라 시계도 서울 시각으로 보여 준다. 시간표·첫차·막차와
   // 기준이 어긋나지 않게 하려는 것이기도 하다.
-  const fmt = new Intl.DateTimeFormat("en-US", {
+  const fmt = new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
-    weekday: "short",
-    year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
+    weekday: "short",
   });
   let lastClockText = "";
   let lastStatusText = "";
@@ -680,6 +764,7 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
           lastTimeValue = minutes;
           timeRange.value = String(minutes);
           timeLabel.textContent = formatMinutes(minutes);
+          paintProgress();
         }
       }
 
@@ -704,7 +789,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
           clock.textContent = c;
           lastClockText = c;
         }
-        const parts = [`${trainCount} trains`, `${network.stations.length} stations`];
+        // 노선·역 수는 왼쪽 위 카드에 있으므로 여기서는 움직이는 값만 적는다.
+        const parts = [`운행 열차 ${trainCount}대`];
         if (crowdOn && crowdNote) parts.push(crowdNote);
         if (liveNote) parts.push(liveNote);
         const s = parts.join("  ·  ");
@@ -732,6 +818,8 @@ export function mountHud(root: HTMLElement, network: Network, state: SimState, h
       if (nightV !== lastNight) {
         night.setAttribute("aria-pressed", nightV);
         lastNight = nightV;
+        // 패널도 지도와 같은 밝기로 맞춘다. 밝은 지도에 어두운 패널은 떠 보인다.
+        document.documentElement.dataset.theme = state.night ? "dark" : "light";
       }
     },
     renderLegend,

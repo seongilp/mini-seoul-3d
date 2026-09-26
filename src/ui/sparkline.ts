@@ -8,8 +8,9 @@ const GAP = 1.2;
 
 const COLOR_OFF = "#6fb6e8";
 const COLOR_ON = "#ff7a30";
-const COLOR_AXIS = "rgba(246, 240, 228, 0.22)";
-const COLOR_MARK = "rgba(246, 240, 228, 0.5)";
+/** 축과 눈금은 패널 테마를 따라가도록 CSS 변수로 칠한다. */
+const COLOR_AXIS = "var(--chart-axis)";
+const COLOR_MARK = "var(--chart-mark)";
 
 function bar(x: number, y: number, w: number, h: number, fill: string, dim: boolean): string {
   const r = Math.min(1.5, w / 2);
@@ -44,13 +45,13 @@ export function renderStationChart(flow: StationFlow, currentHour: number): stri
   const marks = [6, 12, 18]
     .map(
       (h) =>
-        `<text x="${(h * slot).toFixed(1)}" y="${HEIGHT - 0.5}" fill="${COLOR_MARK}" font-size="7.5" font-family="IBM Plex Mono, monospace">${h}</text>`,
+        `<text x="${(h * slot).toFixed(1)}" y="${HEIGHT - 0.5}" style="fill:${COLOR_MARK}" font-size="7.5" font-family="inherit">${h}</text>`,
     )
     .join("");
 
   return `<svg class="chart" viewBox="0 0 ${WIDTH} ${HEIGHT + 9}" width="100%" role="img" aria-label="시간대별 승하차">
-    <rect x="${markX.toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${HEIGHT}" fill="rgba(246,240,228,0.07)"/>
-    <line x1="0" y1="${MID}" x2="${WIDTH}" y2="${MID}" stroke="${COLOR_AXIS}" stroke-width="0.7"/>
+    <rect x="${markX.toFixed(1)}" y="0" width="${slot.toFixed(1)}" height="${HEIGHT}" style="fill:var(--chart-band)"/>
+    <line x1="0" y1="${MID}" x2="${WIDTH}" y2="${MID}" style="stroke:${COLOR_AXIS}" stroke-width="0.7"/>
     ${bars.join("")}
     ${marks}
   </svg>`;

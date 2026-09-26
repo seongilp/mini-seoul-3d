@@ -73,7 +73,7 @@ const hud = mountHud(hudRoot, network, state, {
   onToggleLine(id) {
     if (state.hiddenLines.has(id)) state.hiddenLines.delete(id);
     else state.hiddenLines.add(id);
-    addTransitLayers(map, network, state.hiddenLines);
+    addTransitLayers(map, network, state.hiddenLines, state.night);
     trains = seedTrains(routes, state, timetable);
     hud.renderLegend();
   },
@@ -234,14 +234,14 @@ function hideLoader() {
 
 function showFatal(message: string) {
   loader.classList.remove("is-gone");
-  loader.innerHTML = `<div class="loader-mark">MINI SEOUL 3D</div><div class="loader-sub"></div>`;
+  loader.innerHTML = `<div class="loader-mark">Mini Seoul 3D</div><div class="loader-sub"></div>`;
   loader.querySelector(".loader-sub")!.textContent = message;
 }
 
 function paintOverlay() {
   try {
     restyleBase(map, state.night);
-    addTransitLayers(map, network, state.hiddenLines);
+    addTransitLayers(map, network, state.hiddenLines, state.night);
   } catch (error) {
     console.error("overlay failed", error);
     return;

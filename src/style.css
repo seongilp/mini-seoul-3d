@@ -1,12 +1,65 @@
+/*
+ * 패널은 지도 위에 떠 있는 카드다. 지도 밝기(주간·야간)에 맞춰
+ * html[data-theme] 로 두 벌의 색을 바꿔 끼운다.
+ */
 :root {
-  --ink: #1c1a17;
-  --paper: #f4efe4;
-  --panel: rgba(22, 20, 17, 0.78);
-  --panel-border: rgba(255, 244, 220, 0.12);
-  --text: #f6f0e4;
-  --muted: #c4b8a4;
-  --accent: #e23b2d;
-  --shadow: 0 10px 40px rgba(16, 12, 8, 0.28);
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Noto Sans KR", sans-serif;
+
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --gap: 16px;
+  --timebar-h: 88px;
+  --thumb: 18px;
+
+  --accent: #e5484d;
+  --off: #3b8fd9;
+  --on: #f07a2e;
+  --line2: #00a84d;
+}
+
+:root,
+:root[data-theme="light"] {
+  --card: rgba(255, 255, 255, 0.94);
+  --card-solid: #ffffff;
+  --border: rgba(17, 19, 24, 0.07);
+  --divider: rgba(17, 19, 24, 0.08);
+  --text: #15171c;
+  --muted: #6a707a;
+  --faint: #a0a5ad;
+  --fill: rgba(17, 19, 24, 0.05);
+  --fill-hover: rgba(17, 19, 24, 0.08);
+  --active-bg: #15171c;
+  --active-fg: #ffffff;
+  --track: rgba(17, 19, 24, 0.1);
+  --scrim: rgba(17, 19, 24, 0.28);
+  --shadow: 0 1px 2px rgba(17, 19, 24, 0.05), 0 10px 32px rgba(17, 19, 24, 0.1);
+  --chart-axis: rgba(17, 19, 24, 0.18);
+  --chart-mark: rgba(17, 19, 24, 0.42);
+  --chart-band: rgba(17, 19, 24, 0.05);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --card: rgba(22, 24, 30, 0.9);
+  --card-solid: #1a1c22;
+  --border: rgba(255, 255, 255, 0.07);
+  --divider: rgba(255, 255, 255, 0.08);
+  --text: #f1f2f4;
+  --muted: #9aa0aa;
+  --faint: #6c727c;
+  --fill: rgba(255, 255, 255, 0.06);
+  --fill-hover: rgba(255, 255, 255, 0.1);
+  --active-bg: #f1f2f4;
+  --active-fg: #15171c;
+  --track: rgba(255, 255, 255, 0.12);
+  --scrim: rgba(6, 7, 10, 0.55);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.38);
+  --chart-axis: rgba(255, 255, 255, 0.2);
+  --chart-mark: rgba(255, 255, 255, 0.45);
+  --chart-band: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
 }
 
 * {
@@ -24,9 +77,15 @@ body,
 
 body {
   overflow: hidden;
-  font-family: "IBM Plex Sans KR", sans-serif;
+  font-family: var(--font);
+  font-feature-settings: "tnum";
+  -webkit-font-smoothing: antialiased;
   color: var(--text);
-  background: #1a1814;
+  background: #141820;
+}
+
+button {
+  font-family: inherit;
 }
 
 #app {
@@ -45,103 +104,149 @@ body {
   z-index: 2;
 }
 
-/*
- * 시계와 제목은 지도 위에 바로 얹혀 있어서 밝은 지역에서 묻힌다.
- * 좌상단에만 옅은 그늘을 깔아 대비를 만든다.
- */
-#hud::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: min(420px, 60vw);
-  height: 150px;
-  background: radial-gradient(
-    120% 100% at 0% 0%,
-    rgba(18, 16, 13, 0.55) 0%,
-    rgba(18, 16, 13, 0.28) 45%,
-    rgba(18, 16, 13, 0) 100%
-  );
-  pointer-events: none;
-}
-
 #hud > * {
   pointer-events: auto;
 }
 
-.clock {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 13px;
-  letter-spacing: 0.02em;
-  color: #f6f0e4;
-  text-shadow:
-    0 1px 3px rgba(12, 10, 8, 0.85),
-    0 2px 12px rgba(12, 10, 8, 0.6);
+/* 떠 있는 카드의 공통 바탕. */
+.brand,
+.search input,
+.search-list,
+.toolbar,
+.zoom-stack,
+.legend,
+.popup,
+.follow,
+.timebar,
+.tip,
+.crowd-legend {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
 }
+
+/* ── 브랜드 ─────────────────────────────────────────── */
 
 .brand {
   position: absolute;
-  top: 42px;
-  left: 16px;
+  top: var(--gap);
+  left: var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 10px;
+  border-radius: var(--radius-lg);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--active-bg);
+  flex: none;
+}
+
+.brand-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
-.brand strong {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  text-shadow:
-    0 1px 3px rgba(12, 10, 8, 0.8),
-    0 2px 18px rgba(12, 10, 8, 0.6);
+.brand-text strong {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 
-.brand span {
+.brand-text span {
   font-size: 11px;
-  color: #d9cdb8;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-shadow: 0 1px 4px rgba(12, 10, 8, 0.8);
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
 }
+
+.brand-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--divider);
+}
+
+.brand-stats div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.brand-stats b {
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: right;
+}
+
+.brand-stats small {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* ── 검색 ─────────────────────────────────────────── */
 
 .search {
   position: absolute;
-  top: 16px;
+  top: var(--gap);
   left: 50%;
   transform: translateX(-50%);
-  width: min(360px, calc(100vw - 140px));
+  width: min(380px, calc(100vw - 640px));
+  min-width: 260px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 15px;
+  top: 14px;
+  z-index: 1;
+  color: var(--muted);
+  pointer-events: none;
+  display: flex;
 }
 
 .search input {
   width: 100%;
-  border: 1px solid var(--panel-border);
-  background: var(--panel);
+  height: 46px;
   color: var(--text);
-  border-radius: 999px;
-  padding: 10px 16px;
-  font: 500 14px/1.2 "IBM Plex Sans KR", sans-serif;
+  border-radius: var(--radius-md);
+  padding: 0 16px 0 42px;
+  font: 500 14px/1 var(--font);
   outline: none;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.search input:focus {
+  border-color: color-mix(in srgb, var(--text) 30%, transparent);
 }
 
 .search input::placeholder {
-  color: #a89c88;
+  color: var(--faint);
+}
+
+.search input::-webkit-search-cancel-button {
+  filter: grayscale(1);
 }
 
 .search-list {
   margin-top: 8px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   overflow: auto;
-  max-height: 280px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  max-height: 320px;
+  padding: 6px;
 }
 
 .search-list:empty,
@@ -153,103 +258,195 @@ body {
   width: 100%;
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  font: inherit;
+  font: 600 14px/1.3 var(--font);
   cursor: pointer;
   text-align: left;
 }
 
 .search-item:hover,
 .search-item[aria-selected="true"] {
-  background: rgba(255, 244, 220, 0.08);
+  background: var(--fill);
 }
 
 .search-item small {
   color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  text-align: right;
+}
+
+/* ── 툴바 ─────────────────────────────────────────── */
+
+.toolbar,
+.zoom-stack {
+  position: absolute;
+  right: var(--gap);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius-lg);
 }
 
 .toolbar {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  top: var(--gap);
+}
+
+.zoom-stack {
+  bottom: calc(var(--timebar-h) + var(--gap) * 2);
+}
+
+.tb-sep {
+  width: 22px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--divider);
 }
 
 .toolbar button,
 .zoom-stack button {
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel);
-  color: var(--text);
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
   border-radius: 12px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  background: transparent;
+  color: var(--text);
   cursor: pointer;
-  font: 600 16px/1 "IBM Plex Sans KR", sans-serif;
+  font: 600 17px/1 var(--font);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.toolbar button:hover,
+.zoom-stack button:hover {
+  background: var(--fill-hover);
+}
+
+.toolbar button:focus-visible,
+.zoom-stack button:focus-visible,
+.timebar-now:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 .toolbar button[aria-pressed="true"] {
-  outline: 2px solid #f2d39a;
+  background: var(--active-bg);
+  color: var(--active-fg);
 }
 
-/* 글자 버튼은 16px 로 쓰면 40px 안에 들어가지 않는다. */
+/* 글자 버튼은 아이콘보다 작게 써야 버튼 안에 들어간다. */
 .toolbar button.text {
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 /* 한자 두 글자를 위아래로 쌓아 정사각형 안에 맞춘다. */
 .toolbar button.stack {
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 700;
   line-height: 1.05;
-  padding: 0 6px;
+  padding: 0 8px;
   word-break: break-all;
 }
 
-.zoom-stack {
-  position: absolute;
-  right: 16px;
-  bottom: 88px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.toolbar button.is-live,
+.toolbar button.is-live[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
+
+.toolbar button.is-crowd,
+.toolbar button.is-crowd[aria-pressed="true"] {
+  color: var(--off);
+  background: color-mix(in srgb, var(--off) 15%, transparent);
+}
+
+.zoom-stack button {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.zoom-stack #btn-north {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* 툴바 버튼 설명. 툴바가 오른쪽 끝에 붙어 있어 왼쪽으로 띄운다. */
+.tip {
+  position: fixed;
+  transform: translateY(-50%);
+  max-width: 240px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: var(--card-solid);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tip span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+/* ── 노선 범례 ─────────────────────────────────────── */
 
 .legend {
   position: absolute;
-  left: 16px;
-  bottom: 16px;
-  width: min(320px, calc(100vw - 32px));
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  padding: 12px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  left: var(--gap);
+  bottom: calc(var(--timebar-h) + var(--gap) * 2);
+  width: min(340px, calc(100vw - 32px));
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+
+.legend[hidden] {
+  display: none;
 }
 
 .legend-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 12px;
+  align-items: baseline;
+  margin: 0 4px 8px;
+  font-size: 11.5px;
   color: var(--muted);
+}
+
+.legend-head span:first-child {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .legend-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px 10px;
-  max-height: 220px;
+  gap: 2px 6px;
+  max-height: 240px;
   overflow: auto;
 }
 
@@ -258,12 +455,17 @@ body {
   align-items: center;
   gap: 8px;
   border: 0;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
-  font: 500 12px/1.2 "IBM Plex Sans KR", sans-serif;
-  padding: 5px 2px;
+  font: 500 12.5px/1.2 var(--font);
+  padding: 6px;
   cursor: pointer;
   text-align: left;
+}
+
+.legend-item:hover {
+  background: var(--fill);
 }
 
 .legend-item.is-off {
@@ -271,26 +473,26 @@ body {
 }
 
 .swatch {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 99px;
   flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
+
+/* ── 역 · 열차 패널 ───────────────────────────────── */
 
 .popup {
   position: absolute;
-  left: 16px;
-  top: 108px;
-  width: min(300px, calc(100vw - 32px));
+  left: var(--gap);
+  top: 88px;
+  width: min(320px, calc(100vw - 32px));
   /* 환승역은 노선이 많아 팝업이 길어진다. 화면을 넘기지 않게 잘라 준다. */
-  max-height: calc(100vh - 130px);
+  max-height: calc(100vh - 88px - var(--timebar-h) - var(--gap) * 2);
   overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  scrollbar-width: thin;
 }
 
 .popup[hidden] {
@@ -298,15 +500,19 @@ body {
 }
 
 .popup h2 {
-  margin: 0 0 4px;
-  font-size: 20px;
-  letter-spacing: -0.04em;
+  margin: 0 0 2px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
 
 .popup .en {
   color: var(--muted);
-  font-size: 12px;
-  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
 }
 
 .chips {
@@ -317,107 +523,55 @@ body {
 
 .chip {
   border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-}
-
-.status {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  font-size: 11px;
-  color: #efe6d4;
-  text-shadow:
-    0 1px 3px rgba(12, 10, 8, 0.85),
-    0 2px 10px rgba(12, 10, 8, 0.6);
-}
-
-#loader {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 10px;
-  background: #1c1914;
-  pointer-events: none;
-}
-
-#loader.is-gone {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.5s ease;
-}
-
-.loader-mark {
-  font-size: 28px;
+  padding: 4px 10px;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
 }
 
-.loader-sub {
-  color: #b7aa94;
-  font-size: 13px;
-}
-
-.maplibregl-ctrl-bottom-left,
-.maplibregl-ctrl-bottom-right {
-  display: none;
-}
-
-@media (max-width: 720px) {
-  .search {
-    left: 16px;
-    right: 64px;
-    width: auto;
-    transform: none;
-    top: 72px;
-  }
-
-  .legend {
-    display: none;
-  }
-}
-
-.toolbar button.is-live {
-  color: #ff6b5a;
-  border-color: rgba(255, 107, 90, 0.55);
-  background: rgba(255, 107, 90, 0.14);
+.arrivals,
+.timetable,
+.flow,
+.train-stops {
+  margin-top: 16px;
+  border-top: 1px solid var(--divider);
+  padding-top: 14px;
 }
 
 .arrivals {
-  margin-top: 12px;
-  border-top: 1px solid var(--panel-border);
-  padding-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  max-height: 220px;
+  gap: 11px;
+  max-height: 240px;
   overflow-y: auto;
 }
 
 .arrivals-loading,
 .arrivals-empty {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .arrival {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
 }
 
-.arrival-dot {
+.arrival-dot,
+.tt-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 4px;
+  flex: none;
+}
+
+.tt-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
-  margin-top: 5px;
-  flex: none;
+  margin-top: 0;
 }
 
 .arrival-body {
@@ -425,69 +579,60 @@ body {
 }
 
 .arrival-head {
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
 }
 
-.arrival-head em {
+.arrival-head em,
+.train-status em,
+.follow-cong {
   font-style: normal;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(246, 240, 228, 0.16);
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--fill-hover);
   color: var(--text);
 }
 
 .arrival-head em.is-last {
-  background: rgba(226, 59, 45, 0.85);
+  background: var(--accent);
+  color: #fff;
 }
 
 .arrival-eta {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 2px;
 }
 
-.timetable {
-  margin-top: 12px;
-  border-top: 1px solid var(--panel-border);
-  padding-top: 10px;
-}
-
-.timetable[hidden] {
+.timetable[hidden],
+.flow[hidden] {
   display: none;
 }
 
-.timetable-head {
+.timetable-head,
+.train-stops-head {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--muted);
-  letter-spacing: 0.04em;
-  margin-bottom: 7px;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
 }
 
 .tt-row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 2px 0;
-}
-
-.tt-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  flex: none;
+  gap: 8px;
+  padding: 3px 0;
 }
 
 .tt-dest {
-  font-size: 12px;
+  font-size: 12.5px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -495,150 +640,42 @@ body {
 }
 
 .tt-times {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
   margin-left: auto;
   flex: none;
-}
-
-.toolbar button.is-crowd {
-  color: #6fb6e8;
-  border-color: rgba(111, 182, 232, 0.55);
-  background: rgba(111, 182, 232, 0.16);
-}
-
-.timebar {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  width: min(520px, calc(100vw - 220px));
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
-}
-
-.timebar-label {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 12.5px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  flex: none;
-  min-width: 44px;
-}
-
-.timebar-hint {
-  font-size: 10.5px;
-  color: var(--muted);
-  flex: none;
-  white-space: nowrap;
-}
-
-.timebar.is-locked {
-  opacity: 0.55;
-}
-
-#timebar-range {
-  flex: 1;
-  min-width: 0;
-  appearance: none;
-  height: 4px;
-  border-radius: 999px;
-  /* 새벽·낮·밤을 옅게 구분해 하루의 위치를 가늠하게 한다. */
-  background: linear-gradient(
-    90deg,
-    rgba(255, 244, 220, 0.14) 0%,
-    rgba(255, 244, 220, 0.14) 21%,
-    rgba(255, 244, 220, 0.36) 29%,
-    rgba(255, 244, 220, 0.36) 79%,
-    rgba(255, 244, 220, 0.14) 87%,
-    rgba(255, 244, 220, 0.14) 100%
-  );
-  outline: none;
-}
-
-#timebar-range::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: var(--text);
-  border: 2px solid rgba(28, 26, 23, 0.85);
-  cursor: grab;
-}
-
-#timebar-range::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: var(--text);
-  border: 2px solid rgba(28, 26, 23, 0.85);
-  cursor: grab;
-}
-
-#timebar-range:disabled::-webkit-slider-thumb {
-  cursor: default;
-}
-
-@media (max-width: 640px) {
-  .timebar {
-    width: calc(100vw - 32px);
-    bottom: 54px;
-  }
-
-  .timebar-hint {
-    display: none;
-  }
-}
-
-.flow {
-  margin-top: 12px;
-  border-top: 1px solid var(--panel-border);
-  padding-top: 10px;
-}
-
-.flow[hidden] {
-  display: none;
 }
 
 .flow-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .flow-hour {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .flow-nums {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   margin-left: auto;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .flow-nums b {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .flow-nums .is-off {
-  color: #6fb6e8;
+  color: var(--off);
 }
 
 .flow-nums .is-on {
-  color: #ff9a5c;
+  color: var(--on);
 }
 
 .flow .chart {
@@ -646,124 +683,31 @@ body {
 }
 
 .flow-foot {
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 4px;
-}
-
-.follow {
-  position: absolute;
-  left: 50%;
-  /* 검색창이 상단 중앙을 쓰므로 그 아래로 내린다. */
-  top: 62px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.follow[hidden] {
-  display: none;
-}
-
-.follow-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex: none;
-}
-
-.follow-line {
-  font-weight: 600;
-}
-
-.follow-dest {
-  color: var(--text);
-}
-
-.follow-cong {
   font-size: 10.5px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(246, 240, 228, 0.16);
-}
-
-.follow-cong[hidden] {
-  display: none;
-}
-
-.follow-hint {
-  font-size: 10px;
-  color: var(--muted);
-  border-left: 1px solid var(--panel-border);
-  padding-left: 8px;
-}
-
-@media (max-width: 640px) {
-  .follow-hint {
-    display: none;
-  }
-}
-
-.timebar-now {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text);
-  background: rgba(246, 240, 228, 0.16);
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  padding: 3px 10px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.timebar-now:hover {
-  background: rgba(246, 240, 228, 0.26);
-}
-
-.timebar-now[hidden] {
-  display: none;
-}
-
-.timebar-hint[hidden] {
-  display: none;
-}
-
-.follow-next {
-  font-size: 11px;
-  color: var(--muted);
+  color: var(--faint);
+  margin-top: 6px;
 }
 
 .train-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 8px;
 }
 
 .train-badge {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 11.5px;
+  font-weight: 800;
   color: #ffffff;
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 4px 10px;
   flex: none;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
 }
 
 .train-dest {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 800;
   letter-spacing: -0.03em;
   min-width: 0;
   overflow: hidden;
@@ -772,42 +716,28 @@ body {
 }
 
 .train-status {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.train-status em {
-  font-style: normal;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(246, 240, 228, 0.16);
-  color: var(--text);
-}
-
-.train-stops {
-  margin-top: 12px;
-  border-top: 1px solid var(--panel-border);
-  padding-top: 10px;
-}
-
-.train-stops-head {
-  font-size: 11px;
-  font-weight: 600;
+.train-status em.is-estimate {
+  background: var(--fill);
   color: var(--muted);
-  letter-spacing: 0.04em;
-  margin-bottom: 7px;
+}
+
+.train-cong-src {
+  font-size: 10.5px;
+  color: var(--faint);
 }
 
 .train-stop {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 0;
+  gap: 10px;
+  padding: 4px 0;
   position: relative;
 }
 
@@ -815,11 +745,11 @@ body {
 .train-stop::before {
   content: "";
   position: absolute;
-  left: 3px;
+  left: 4px;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--panel-border);
+  background: var(--divider);
 }
 
 .train-stop:first-of-type::before {
@@ -831,16 +761,17 @@ body {
 }
 
 .train-stop-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
   flex: none;
   position: relative;
-  box-shadow: 0 0 0 2px rgba(22, 20, 17, 0.9);
+  box-shadow: 0 0 0 2.5px var(--card-solid);
 }
 
 .train-stop-name {
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 500;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -848,189 +779,283 @@ body {
 }
 
 .train-stop-eta {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
   margin-left: auto;
   flex: none;
 }
 
-/* 툴바 버튼 설명. 툴바가 오른쪽 끝에 붙어 있어 왼쪽으로 띄운다. */
-.tip {
-  position: fixed;
-  transform: translateY(-50%);
-  max-width: 230px;
-  padding: 8px 12px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
-  pointer-events: none;
-  z-index: 4;
+/* ── 따라가기 알림 ───────────────────────────────── */
+
+.follow {
+  position: absolute;
+  left: 50%;
+  /* 검색창이 상단 중앙을 쓰므로 그 아래로 내린다. */
+  top: 74px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
-.tip[hidden] {
+.follow[hidden],
+.follow-cong[hidden] {
   display: none;
 }
 
-.tip strong {
-  display: block;
-  font-size: 12.5px;
+.follow-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.follow-line {
+  font-weight: 800;
+}
+
+.follow-dest {
   font-weight: 600;
 }
 
-.tip span {
-  display: block;
-  font-size: 11px;
+.follow-next {
+  font-size: 12px;
   color: var(--muted);
-  margin-top: 2px;
-  line-height: 1.4;
 }
 
-.help {
+.follow-hint {
+  font-size: 11px;
+  color: var(--faint);
+  border-left: 1px solid var(--divider);
+  padding-left: 10px;
+}
+
+/* ── 시간 막대 ───────────────────────────────────── */
+
+.timebar {
   position: absolute;
-  inset: 0;
-  z-index: 6;
+  left: var(--gap);
+  right: var(--gap);
+  bottom: var(--gap);
+  height: var(--timebar-h);
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(12, 10, 8, 0.55);
-  backdrop-filter: blur(3px);
+  gap: 28px;
+  padding: 0 20px 0 24px;
+  border-radius: 22px;
 }
 
-.help[hidden] {
-  display: none;
-}
-
-.help-card {
-  width: min(560px, 100%);
-  max-height: 100%;
+.timebar-time {
   display: flex;
   flex-direction: column;
-  background: rgba(24, 22, 18, 0.96);
-  border: 1px solid var(--panel-border);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  overflow: hidden;
+  flex: none;
+  min-width: 128px;
 }
 
-.help-top {
+.timebar-caption {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.timebar-label {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+.timebar-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+#timebar-range {
+  --p: 0%;
+  width: 100%;
+  margin: 0;
+  height: var(--thumb);
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+/* 지나온 구간은 진하게, 남은 구간은 옅게. */
+#timebar-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--text) var(--p), var(--track) var(--p));
+}
+
+#timebar-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+#timebar-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text);
+}
+
+#timebar-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((6px - var(--thumb)) / 2);
+  border-radius: 999px;
+  background: var(--card-solid);
+  border: 4px solid var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
+  cursor: grab;
+  transition: transform 0.12s ease;
+}
+
+#timebar-range::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 999px;
+  background: var(--card-solid);
+  border: 4px solid var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
+  cursor: grab;
+}
+
+#timebar-range:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+  cursor: grabbing;
+}
+
+#timebar-range:disabled {
+  cursor: default;
+}
+
+#timebar-range:disabled::-webkit-slider-thumb {
+  cursor: default;
+}
+
+.timebar-ticks {
+  position: relative;
+  height: 14px;
+}
+
+.timebar-ticks span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--faint);
+}
+
+.status {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timebar-side {
   display: flex;
   align-items: center;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.help-top strong {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.help-top button {
-  margin-left: auto;
-  width: 26px;
-  height: 26px;
-  border: none;
-  background: rgba(246, 240, 228, 0.12);
-  color: var(--text);
-  border-radius: 8px;
-  cursor: pointer;
-  font: 600 12px/1 inherit;
-}
-
-.help-top button:hover {
-  background: rgba(246, 240, 228, 0.22);
-}
-
-.help-body {
-  padding: 6px 18px 16px;
-  overflow-y: auto;
-}
-
-.help-section {
-  margin-top: 14px;
-}
-
-.help-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.help-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 4px 0;
-}
-
-.help-key {
+  gap: 8px;
   flex: none;
-  min-width: 46px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 6px;
-  border-radius: 7px;
-  background: rgba(246, 240, 228, 0.13);
-  border: 1px solid var(--panel-border);
 }
 
-.help-key.is-text {
-  min-width: 92px;
-  font-weight: 500;
-  font-size: 11.5px;
-}
-
-.help-name {
-  flex: none;
-  min-width: 58px;
+.timebar-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--fill);
   font-size: 12.5px;
   font-weight: 600;
-}
-
-.help-desc {
-  font-size: 12px;
   color: var(--muted);
-  line-height: 1.45;
+  white-space: nowrap;
 }
 
-.help-foot {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--panel-border);
-  font-size: 10.5px;
-  color: var(--muted);
-  line-height: 1.5;
+/* 실시간일 때는 시각을 옮길 수 없다. 대신 살아 있다는 표시를 준다. */
+.timebar.is-locked .timebar-hint {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-@media (max-width: 640px) {
-  .tip {
-    display: none;
+.timebar.is-locked .timebar-hint::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: pulse 1.8s ease-out infinite;
+}
+
+.timebar.is-locked #timebar-range {
+  opacity: 0.85;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
   }
-
-  .help-name {
-    min-width: 0;
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
   }
 }
+
+.timebar-now {
+  height: 40px;
+  padding: 0 18px;
+  border: 1.5px solid var(--text);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.timebar-now:hover {
+  background: var(--active-bg);
+  color: var(--active-fg);
+}
+
+.timebar-now[hidden],
+.timebar-hint[hidden] {
+  display: none;
+}
+
+/* ── 혼잡도 범례 ─────────────────────────────────── */
 
 .crowd-legend {
   position: absolute;
-  left: 16px;
-  bottom: 16px;
+  left: var(--gap);
+  bottom: calc(var(--timebar-h) + var(--gap) * 2);
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 9px 13px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+  gap: 7px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
 }
 
 .crowd-legend[hidden] {
@@ -1040,23 +1065,23 @@ body {
 .lg-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .lg-title {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--muted);
-  letter-spacing: 0.03em;
-  min-width: 62px;
+  min-width: 66px;
 }
 
 .lg-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .lg-item i {
@@ -1067,22 +1092,310 @@ body {
 }
 
 .lg-note {
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 10.5px;
+  color: var(--faint);
 }
 
-@media (max-width: 720px) {
-  .crowd-legend {
-    display: none;
+/* ── 도움말 ─────────────────────────────────────── */
+
+.help {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+}
+
+.help[hidden] {
+  display: none;
+}
+
+.help-card {
+  width: min(580px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.help-top {
+  display: flex;
+  align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.help-top strong {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.help-top button {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--fill);
+  color: var(--text);
+  border-radius: 999px;
+  cursor: pointer;
+  font: 600 13px/1 var(--font);
+}
+
+.help-top button:hover {
+  background: var(--fill-hover);
+}
+
+.help-body {
+  padding: 4px 22px 20px;
+  overflow-y: auto;
+}
+
+.help-section {
+  margin-top: 18px;
+}
+
+.help-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.help-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+.help-key {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 28px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--fill);
+}
+
+.help-key.is-text {
+  min-width: 100px;
+  font-weight: 600;
+}
+
+.help-name {
+  flex: none;
+  min-width: 60px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.help-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.help-foot {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.6;
+}
+
+/* ── 로딩 ─────────────────────────────────────── */
+
+#loader {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  background: #141820;
+  color: #f1f2f4;
+  pointer-events: none;
+}
+
+#loader.is-gone {
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.loader-ring {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  border: 6px solid rgba(0, 168, 77, 0.25);
+  border-top-color: var(--line2);
+  animation: spin 0.9s linear infinite;
+}
+
+.loader-mark {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.loader-sub {
+  color: #9aa0aa;
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-.train-status em.is-estimate {
-  background: rgba(246, 240, 228, 0.09);
-  color: var(--muted);
+@media (prefers-reduced-motion: reduce) {
+  .loader-ring,
+  .timebar.is-locked .timebar-hint::before {
+    animation: none;
+  }
 }
 
-.train-cong-src {
-  font-size: 10px;
-  color: var(--muted);
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  display: none;
+}
+
+/* ── 좁은 화면 ─────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .brand-stats {
+    display: none;
+  }
+
+  .search {
+    width: min(340px, calc(100vw - 480px));
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gap: 12px;
+    --timebar-h: 108px;
+  }
+
+  .brand {
+    padding: 8px 14px 8px 8px;
+    gap: 10px;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .brand-text strong {
+    font-size: 16px;
+  }
+
+  .brand-text span {
+    display: none;
+  }
+
+  .search {
+    left: var(--gap);
+    right: 70px;
+    width: auto;
+    min-width: 0;
+    transform: none;
+    top: 72px;
+  }
+
+  .popup {
+    top: 130px;
+    max-height: calc(100vh - 130px - var(--timebar-h) - var(--gap) * 2);
+  }
+
+  .follow {
+    top: 128px;
+    left: var(--gap);
+    right: 70px;
+    transform: none;
+    overflow: hidden;
+  }
+
+  .toolbar button,
+  .zoom-stack button {
+    width: 34px;
+    height: 34px;
+  }
+
+  /* 핀치로 확대할 수 있고 세로 공간이 부족하다. */
+  .zoom-stack,
+  .legend,
+  .crowd-legend,
+  .tip,
+  .follow-hint {
+    display: none;
+  }
+
+  .timebar {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 6px 12px;
+    padding: 12px 16px;
+  }
+
+  .timebar-time {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    order: 1;
+  }
+
+  .timebar-label {
+    font-size: 26px;
+  }
+
+  .timebar-side {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .timebar-hint,
+  .timebar-now {
+    height: 32px;
+    font-size: 12px;
+  }
+
+  .timebar-track {
+    order: 3;
+    flex-basis: 100%;
+    padding-top: 0;
+  }
+
+  .timebar-ticks span:nth-child(even) {
+    display: none;
+  }
+
+  .status {
+    display: none;
+  }
+
+  .help-name {
+    min-width: 0;
+  }
 }
