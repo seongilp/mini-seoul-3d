@@ -17,7 +17,7 @@ export function createMap(container: HTMLElement, night: boolean): maplibregl.Ma
     pitch: 60,
     bearing: -22,
     maxPitch: 72,
-    minZoom: 9.2,
+    minZoom: 6,
     maxZoom: 17.4,
     attributionControl: false,
     hash: false,

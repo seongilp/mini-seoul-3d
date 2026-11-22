@@ -5,6 +5,8 @@ import type { LineInfo, Network, Route, RouteStation, SimState } from "../types"
 
 export type Train = {
   id: string;
+  /** 고속열차(KTX·SRT)면 "express". 없으면 지하철 전동차. */
+  kind?: "express";
   routeId: string;
   line: string;
   color: string;

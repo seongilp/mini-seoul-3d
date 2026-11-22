@@ -17,6 +17,10 @@ export interface TrainModel {
   cab: CarGeometries;
   /** 운전실차 앞면의 등. 전조등·미등이 같은 형상을 쓴다. */
   lamp: THREE.BufferGeometry;
+  /** 고속열차(KTX·SRT)의 중간차와 유선형 선두차. */
+  hsMid: CarGeometries;
+  hsCab: CarGeometries;
+  hsLamp: THREE.BufferGeometry;
 }
 
 /** 문짝·허리띠의 은색. */
@@ -48,6 +52,9 @@ export async function loadTrainModel(): Promise<TrainModel> {
     mid: carGeometries(gltf.scene, "mid"),
     cab: carGeometries(gltf.scene, "cab"),
     lamp: geometryOf(gltf.scene, "cab_lamp"),
+    hsMid: carGeometries(gltf.scene, "hsmid"),
+    hsCab: carGeometries(gltf.scene, "hscab"),
+    hsLamp: geometryOf(gltf.scene, "hscab_lamp"),
   };
 }
 
@@ -69,21 +76,40 @@ export function instanced(
   return mesh;
 }
 
+/** 고속열차는 흰 차체에 노선 색을 띠로 두른다. */
+export const HIGH_SPEED_STYLE: KitStyle = {
+  body: 0xf4f6f8,
+  roof: 0xe6e9ee,
+  stripe: true,
+};
+
+/**
+ * 칸 색을 어떻게 입힐지. 비워 두면 전동차 방식(차체=노선 색, 지붕=밝은 색,
+ * 띠는 은색)이고, 채우면 그 부품은 고정색이 되며 stripe 면 띠가 노선 색이 된다.
+ */
+export interface KitStyle {
+  body?: number;
+  roof?: number;
+  stripe?: boolean;
+}
+
 /** 한 차종(중간차 또는 운전실차)을 부품별 인스턴스 메시로 묶은 것. */
 export class CarKit {
   private readonly parts: Record<CarPart, THREE.InstancedMesh>;
   private readonly glass: THREE.MeshLambertMaterial;
   private readonly capacity: number;
+  private readonly style: KitStyle;
   private n = 0;
 
-  constructor(geometries: CarGeometries, capacity: number) {
+  constructor(geometries: CarGeometries, capacity: number, style: KitStyle = {}) {
     this.capacity = capacity;
+    this.style = style;
     this.glass = lit(GLASS_DAY);
     const materials: Record<CarPart, THREE.Material> = {
-      body: lit(0xffffff),
-      trim: lit(TRIM_COLOR),
+      body: lit(style.body ?? 0xffffff),
+      trim: lit(style.stripe ? 0xffffff : TRIM_COLOR),
       glass: this.glass,
-      roof: lit(0xffffff),
+      roof: lit(style.roof ?? 0xffffff),
       under: lit(UNDER_COLOR),
     };
     this.parts = Object.fromEntries(
@@ -108,8 +134,10 @@ export class CarKit {
   place(matrix: THREE.Matrix4, body: THREE.Color, roof: THREE.Color): void {
     if (this.n >= this.capacity) return;
     for (const part of CAR_PARTS) this.parts[part].setMatrixAt(this.n, matrix);
-    this.parts.body.setColorAt(this.n, body);
-    this.parts.roof.setColorAt(this.n, roof);
+    // 고정색 부품은 인스턴스 색을 건드리지 않는다(재질 색이 그대로 나온다).
+    if (this.style.body === undefined) this.parts.body.setColorAt(this.n, body);
+    if (this.style.roof === undefined) this.parts.roof.setColorAt(this.n, roof);
+    if (this.style.stripe) this.parts.trim.setColorAt(this.n, body);
     this.n++;
   }
 

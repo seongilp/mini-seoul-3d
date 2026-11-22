@@ -4,9 +4,12 @@ import { addTransitLayers } from "./map/layers";
 import { StationLabels } from "./map/stationLabels";
 import { CrowdLayer } from "./map/crowd";
 import { StationFocus } from "./map/focus";
+import { Intercity } from "./intercity/service";
+import { addIntercityLayers } from "./map/intercityLayers";
 import {
   addTrainLayers,
   setTrainColorMode,
+  setTrainRoutes,
   TRAIN_HIT_LAYER,
   updateTrains,
 } from "./map/trains";
@@ -34,7 +37,7 @@ import { createLiveController, type LiveStatus } from "./live/controller";
 import { LiveFleet } from "./live/interpolate";
 import { LIVE_LINES, type LiveLine } from "./live/lines";
 import { RouteIndex } from "./live/place";
-import { mountHud } from "./ui/hud";
+import { mountHud, type FollowInfo } from "./ui/hud";
 
 const state: SimState = {
   clockMs: Date.now(),
@@ -52,6 +55,8 @@ const state: SimState = {
 
 const speeds = [1, 5, 15];
 let trains: Train[] = [];
+/** KTX·SRT. 자료를 못 받아도 도시철도는 그대로 돌아야 해서 늦게, 없을 수도 있게 둔다. */
+let intercity: Intercity | null = null;
 let last = performance.now();
 
 const hudRoot = document.querySelector("#hud") as HTMLElement;
@@ -269,13 +274,14 @@ function paintOverlay() {
     return;
   }
   try {
-    addTrainLayers(map, trains, routes, state.night);
+    addTrainLayers(map, trains, allRoutes(), state.night);
     setTrainColorMode(map, state.crowd);
     setUnderground(map, state.underground, state.night);
   } catch (error) {
     console.error("trains failed", error);
   }
   styleReady = true;
+  paintIntercity();
   try {
     focus.attach(map);
   } catch (error) {
@@ -289,6 +295,36 @@ function paintOverlay() {
   // 스타일을 다시 불러오면 막차 레이어도 사라진다. 켜져 있었으면 다시 올린다.
   if (lastTrain.on) refreshLastTrain(true);
 }
+
+/** 도시철도 노선에 고속철도 노선을 더한 것. 열차 레이어가 칸을 곡선 위에 놓을 때 쓴다. */
+function allRoutes() {
+  return intercity ? [...routes, ...intercity.routes] : routes;
+}
+
+/** 고속철도 선로·역. 열차 레이어 아래에 깔리도록 addTrainLayers 뒤에 부른다. */
+function paintIntercity() {
+  if (!intercity || !styleReady) return;
+  try {
+    addIntercityLayers(map, intercity.services, state.night);
+  } catch (error) {
+    console.error("intercity layers failed", error);
+  }
+}
+
+/** 지금 화면 시각에 달리는 고속열차. */
+function expressNow(): Train[] {
+  return intercity?.trainsAt(state.live ? new Date() : new Date(state.clockMs)) ?? [];
+}
+
+void Intercity.load()
+  .then((loaded) => {
+    intercity = loaded;
+    setTrainRoutes(allRoutes());
+    paintIntercity();
+  })
+  .catch((error) => {
+    console.error("intercity load failed", error);
+  });
 
 /**
  * 승하차 기둥. 데이터가 늦게 와도, 스타일이 다시 로드돼도 붙일 수 있어야 한다.
@@ -335,7 +371,7 @@ function syncToClock() {
   if (!state.live) {
     trains = retimeFleet(trains, routes, state, timetable);
     if (state.crowd) applyCongestion(trains, at);
-    if (map.isStyleLoaded()) updateTrains(map, trains);
+    if (map.isStyleLoaded()) updateTrains(map, [...trains, ...expressNow()]);
   }
   if (state.crowd && crowd) {
     crowd.update(map, at);
@@ -600,6 +636,7 @@ function frame(now: number) {
   last = now;
   state.clockMs += dt * state.speed;
   pendingDt += dt;
+  const express = expressNow();
   const step = !state.eco || frameNo++ % 2 === 0;
   if (step) {
     if (state.live) {
@@ -622,7 +659,7 @@ function frame(now: number) {
     // 혼잡도는 항상 매긴다. 열차를 눌렀을 때 패널에 보여 줘야 하기 때문이다.
     // 실시간 모드는 매 프레임 열차 객체를 새로 만들어서 그리기 직전에 매긴다.
     applyCongestion(trains, currentHour());
-    if (map.isStyleLoaded()) updateTrains(map, trains);
+    if (map.isStyleLoaded()) updateTrains(map, [...trains, ...express]);
   }
 
   // 역 기둥과 팝업 그래프는 매 프레임 다시 만들 만큼 가볍지 않다.
@@ -638,11 +675,12 @@ function frame(now: number) {
   if (styleReady) focus.tick(map, now);
 
   if (followId !== null) {
-    const target = trains.find((t) => t.id === followId);
+    // 고속열차 id 는 매 프레임 새로 만든 객체라 합친 목록에서 찾는다.
+    const target = [...trains, ...express].find((t) => t.id === followId);
     if (target) {
       // easeTo 는 매 프레임 부르면 서로 밀어내므로 중심만 즉시 옮긴다.
       map.jumpTo({ center: target.coord });
-      hud.setFollow({
+      hud.setFollow(target.kind === "express" ? expressFollowInfo(target) : {
         line: network.lines.find((l) => l.id === target.line)?.name ?? target.line,
         color: target.color,
         destination: headsign(target.destination),
@@ -674,6 +712,21 @@ function frame(now: number) {
 
 requestAnimationFrame(frame);
 
+/** 고속열차 패널. 혼잡도 자료가 없어 비워 둔다. */
+function expressFollowInfo(target: Train): FollowInfo {
+  const stops = intercity?.upcoming(target, 7) ?? [];
+  return {
+    line: intercity?.nameOf(target) ?? target.line,
+    color: target.color,
+    destination: headsign(target.destination),
+    congestion: null,
+    congestionMeasured: false,
+    next: stops[0] ? { name: stops[0].name, distance: stops[0].distance } : null,
+    dwelling: target.dwell > 0,
+    stops,
+  };
+}
+
 if (DEBUG) {
   /**
    * 콘솔에서 지도와 시계를 들여다보고 조작할 수 있게 한다.
@@ -685,6 +738,7 @@ if (DEBUG) {
   Object.defineProperties(window, {
     __map: { get: () => map },
     __trains: { get: () => trains },
+    __express: { get: () => expressNow() },
     __congestion: { get: () => congestion },
     __crowd: { get: () => crowd },
     __setHour: {

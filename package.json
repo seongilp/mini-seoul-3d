@@ -12,6 +12,7 @@
     "runtimes": "node scripts/build-runtimes.mjs",
     "ridership": "node scripts/build-ridership.mjs",
     "congestion": "node scripts/build-congestion.mjs",
+    "intercity": "node scripts/build-intercity.mjs",
     "model": "blender --background --python scripts/build-train-model.py"
   },
   "dependencies": {

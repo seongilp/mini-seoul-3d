@@ -2,7 +2,7 @@
 
     blender --background --python scripts/build-train-model.py
 
-중간차(mid)와 운전실차(cab) 두 가지를 만든다. 부품은 재질별로 한 오브젝트에
+전동차 중간차(mid)·운전실차(cab), 고속열차 중간차(hsmid)·앞머리차(hscab)를 만든다. 부품은 재질별로 한 오브젝트에
 합쳐 `<차종>_<부품>` 이름으로 내보낸다. 색은 지도 쪽에서 입히므로 여기서는
 형상만 다룬다.
 
@@ -230,6 +230,131 @@ def under_parts(cab):
     return parts
 
 
+# ── 고속열차(KTX·SRT) ─────────────────────────────────────────────
+# 전동차보다 낮고 둥글며, 앞머리가 길게 누워 있다. 차체는 흰색으로 두고
+# 허리띠(trim)에 운행사 색을 입힌다.
+HS_FLOOR_Z = 0.1 * H
+HS_TOP = 0.86 * H
+HS_BODY_H = HS_TOP - HS_FLOOR_Z
+HS_BEVEL = 0.8
+# 앞머리가 눕는 길이와, 앞끝에서 폭·높이가 줄어드는 비율.
+HS_NOSE = 0.42 * L
+HS_NOSE_WIDTH = 0.55
+HS_NOSE_DROP = 0.5
+# 앞머리 차의 옆면 부품은 여기까지만 놓는다. 그 앞은 차체가 좁아진다.
+HS_SIDE_FRONT = 0.02 * L
+
+
+def hs_nose_shell():
+    """앞으로 갈수록 낮아지고 좁아지는 차체."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    for v in bm.verts:
+        v.co.x *= L
+        v.co.y *= W
+        v.co.z *= HS_BODY_H
+    # 길이 방향으로 잘라 앞머리가 시작되는 단면을 만든다.
+    cut = L / 2 - HS_NOSE
+    bmesh.ops.bisect_plane(
+        bm,
+        geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+        plane_co=(cut, 0, 0),
+        plane_no=(1, 0, 0),
+    )
+    for v in bm.verts:
+        if v.co.x > cut + 0.01:
+            v.co.y *= HS_NOSE_WIDTH
+            if v.co.z > 0:
+                v.co.z -= HS_BODY_H * HS_NOSE_DROP
+    bmesh.ops.bevel(
+        bm, geom=list(bm.edges), offset=HS_BEVEL, segments=2, profile=0.5, affect="EDGES"
+    )
+    obj = new_object("part", bm)
+    obj.location = (0, 0, HS_FLOOR_Z + HS_BODY_H / 2)
+    return obj
+
+
+def hs_side_span(cab):
+    return (-0.46 * L, HS_SIDE_FRONT if cab else 0.46 * L)
+
+
+def hs_body_parts(cab):
+    if cab:
+        return [hs_nose_shell()]
+    return [box((0, 0, HS_FLOOR_Z + HS_BODY_H / 2), (L, W, HS_BODY_H), bevel=HS_BEVEL)]
+
+
+def hs_trim_parts(cab):
+    """창 아래 굵은 허리띠. 운행사 색이 여기에 들어간다."""
+    lo, hi = hs_side_span(cab)
+    return [
+        box(((lo + hi) / 2, side * W / 2, HS_FLOOR_Z + 0.36 * HS_BODY_H), (hi - lo, 0.12, 0.2 * HS_BODY_H))
+        for side in (-1, 1)
+    ]
+
+
+def hs_glass_parts(cab):
+    parts = []
+    lo, hi = hs_side_span(cab)
+    lo += 0.07 * L
+    hi -= 0.02 * L if cab else 0.07 * L
+    panes = 4 if cab else 7
+    pitch = (hi - lo) / panes
+    for side in (-1, 1):
+        for i in range(panes):
+            parts.append(
+                box(
+                    (lo + pitch * (i + 0.5), side * W / 2, HS_FLOOR_Z + 0.63 * HS_BODY_H),
+                    (pitch * 0.84, 0.14, 0.24 * HS_BODY_H),
+                )
+            )
+    if cab:
+        # 누운 앞유리. 앞머리 윗면의 기울기를 따라 붙인다.
+        drop = HS_BODY_H * HS_NOSE_DROP
+        slope = math.atan2(drop, HS_NOSE)
+        parts.append(
+            box(
+                (L / 2 - HS_NOSE * 0.6, 0, HS_TOP - drop * 0.4 + 0.05),
+                (HS_NOSE * 0.44, 0.4 * W, 0.3),
+                tilt=slope,
+            )
+        )
+    return parts
+
+
+def hs_lamp_parts():
+    return [
+        box((L / 2 - 0.02 * L, side * 0.16 * W, HS_FLOOR_Z + 0.22 * HS_BODY_H), (0.25, 0.1 * W, 0.08 * HS_BODY_H))
+        for side in (-1, 1)
+    ]
+
+
+def hs_roof_parts(cab):
+    length = 0.5 * L if cab else 0.9 * L
+    x = -0.22 * L if cab else 0
+    return [box((x, 0, HS_TOP), (length, 0.5 * W, 0.04 * H))]
+
+
+def hs_under_parts(cab):
+    """바퀴를 가리는 치마. 고속열차는 하부가 덮여 있다."""
+    length = 0.86 * L if cab else 0.92 * L
+    x = -0.05 * L if cab else 0
+    return [box((x, 0, HS_FLOOR_Z / 2 + 0.02 * H), (length, 0.88 * W, HS_FLOOR_Z))]
+
+
+def build_highspeed(prefix, cab):
+    groups = {
+        "body": hs_body_parts(cab),
+        "trim": hs_trim_parts(cab),
+        "glass": hs_glass_parts(cab),
+        "roof": hs_roof_parts(cab),
+        "under": hs_under_parts(cab),
+    }
+    if cab:
+        groups["lamp"] = hs_lamp_parts()
+    export_groups(prefix, groups)
+
+
 def smooth(obj):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
@@ -246,6 +371,15 @@ def normalize(obj):
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
 
+def export_groups(prefix, groups):
+    for part, parts in groups.items():
+        obj = join(f"{prefix}_{part}", parts)
+        smooth(obj)
+        normalize(obj)
+        tris = sum(len(p.vertices) - 2 for p in obj.data.polygons)
+        print(f"  {obj.name}: {tris} tris")
+
+
 def build_car(prefix, cab):
     groups = {
         "body": body_parts(cab),
@@ -256,18 +390,15 @@ def build_car(prefix, cab):
     }
     if cab:
         groups["lamp"] = lamp_parts()
-    for part, parts in groups.items():
-        obj = join(f"{prefix}_{part}", parts)
-        smooth(obj)
-        normalize(obj)
-        tris = sum(len(p.vertices) - 2 for p in obj.data.polygons)
-        print(f"  {obj.name}: {tris} tris")
+    export_groups(prefix, groups)
 
 
 def main():
     reset_scene()
     build_car("mid", cab=False)
     build_car("cab", cab=True)
+    build_highspeed("hsmid", cab=False)
+    build_highspeed("hscab", cab=True)
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     bpy.ops.export_scene.gltf(
         filepath=OUT_PATH,
