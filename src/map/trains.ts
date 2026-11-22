@@ -9,6 +9,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { pointAlong } from "../geo";
 import { congestionColor } from "../sim/congestion";
 import { headsign, type PreparedRoute, type Train } from "../sim/fleet";
+import { beamTexture, CarKit, instanced, loadTrainModel, type TrainModel } from "./trainModel";
 
 const ORIGIN: [number, number] = [126.9784, 37.5665];
 /** 실제 전동차 1량 길이(m). */
@@ -24,28 +25,22 @@ const CAR_HEIGHT = 0.32;
 const CAR_FILL = 0.93;
 /** 차체 모서리 둥글기(단위 상자 기준). 길이 방향으로는 끝이 둥글게 말린다. */
 const BODY_RADIUS = 0.14;
-/** 창문 띠. 옆면 위쪽에 어두운 유리를 두른다. 폭을 조금 넘겨 옆으로 비어져 나오게 한다. */
-const WINDOW_COLOR = 0x1b2330;
-/** 운전실 앞유리. 창문보다 조금 더 어둡다. */
-const CAB_COLOR = 0x10151d;
-/** 지붕판은 노선 색에 흰색을 이만큼 섞는다. 위에서 볼 때 윗면이 밝게 떠야 입체로 읽힌다. */
+/** 지붕은 노선 색에 흰색을 이만큼 섞는다. 위에서 볼 때 윗면이 밝게 떠야 입체로 읽힌다. */
 const ROOF_TINT = 0.45;
-
-/** 칸 단위 공간(길이 x, 높이 y 0~1, 폭 z)에서 부품 자리. */
-const localBox = (x: number, y: number, sx: number, sy: number, sz: number) =>
-  new THREE.Matrix4().makeTranslation(x, y, 0).multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
-/** 옆면 위쪽 창문 띠. 끝은 둥근 부분에 걸리지 않게 짧게. */
-const WINDOW_LOCAL = localBox(0, 0.5, 0.78, 0.26, 1.015);
-/** 지붕판. 둥근 모서리 안쪽에 얹어 윗면만 밝힌다. */
-const ROOF_LOCAL = localBox(0, 0.985, 0.74, 0.05, 0.62);
-/** 운전실 앞유리. 칸 끝면에서 살짝 튀어나온다. */
-const CAB_FRONT = localBox(0.492, 0.46, 0.03, 0.34, 0.72);
-const CAB_BACK = localBox(-0.492, 0.46, 0.03, 0.34, 0.72);
-/** 전조등·미등. 앞유리 아래에 가로로 길게. 진행 방향이 한눈에 보인다. */
-const LAMP_FRONT = localBox(0.497, 0.2, 0.02, 0.09, 0.6);
-const LAMP_BACK = localBox(-0.497, 0.2, 0.02, 0.09, 0.6);
 const HEADLIGHT_COLOR = 0xfff4d6;
 const TAILLIGHT_COLOR = 0xff3b30;
+/** 맨 뒤 칸은 운전실차를 반대로 돌려 놓는다. */
+const FLIP = new THREE.Matrix4().makeRotationY(Math.PI);
+/**
+ * 전조등이 선로에 깔리는 빛. 칸 단위 공간에서 앞쪽으로 한 칸 반쯤 뻗는다.
+ * 밤에만 켠다.
+ */
+const BEAM_LOCAL = new THREE.Matrix4()
+  .makeTranslation(1.25, 0, 0)
+  .multiply(new THREE.Matrix4().makeScale(1.7, 1, 1.8));
+const BEAM_OPACITY = 0.5;
+/** 화면 밖 열차는 칸을 만들지 않는다. 경계에서 튀지 않게 이만큼(도) 여유를 둔다. */
+const CULL_MARGIN_DEG = 0.012;
 /** 아무리 멀어져도 편성 전체가 이 픽셀 길이보다 짧아 보이지 않게 한다. */
 const MIN_TRAIN_PX = 15;
 /** 차체 폭도 같은 이유로 하한을 둔다. 없으면 멀리서 실처럼 얇아진다. */
@@ -56,6 +51,8 @@ const CONSIST_ZOOM = 13.2;
 const MAX_CARS = 10;
 /** 인스턴스 상한. 열차 400대 × 10칸을 담고도 남는다. */
 const MAX_INSTANCES = 4600;
+/** 운전실차는 편성마다 앞뒤 두 량뿐이다. */
+const MAX_CABS = 1000;
 /** 혼잡도를 어림할 자료가 없는 열차. 사람 보기 모드에서만 쓴다. */
 const UNKNOWN_CONGESTION_COLOR = "#6b6862";
 const LAYER_ID = "metro-trains-3d";
@@ -93,17 +90,21 @@ class TrainLayer implements CustomLayerInterface {
   private trains: Train[] = [];
   private routes = new Map<string, PreparedRoute>();
   private originMerc = maplibregl.MercatorCoordinate.fromLngLat(ORIGIN, 0);
+  /** 멀리서 편성을 한 덩어리로 그릴 때 쓰는 둥근 상자. */
   private boxes: THREE.InstancedMesh;
-  /** 창문 띠·지붕판·앞유리. 가까이서만 그린다. */
-  private windows: THREE.InstancedMesh;
-  private roofs: THREE.InstancedMesh;
-  private cabs: THREE.InstancedMesh;
+  /** 가까이서 쓰는 Blender 모델. 내려받기 전에는 비어 있다. */
+  private mid: CarKit | null = null;
+  private cab: CarKit | null = null;
   /** 등은 조명을 받지 않는 재질이라 밤에도 빛나 보인다. */
-  private headlights: THREE.InstancedMesh;
-  private taillights: THREE.InstancedMesh;
+  private headlights: THREE.InstancedMesh | null = null;
+  private taillights: THREE.InstancedMesh | null = null;
+  private beams: THREE.InstancedMesh | null = null;
+  private night: boolean;
   private white = new THREE.Color(0xffffff);
   private roofTint = new THREE.Color();
   private part = new THREE.Matrix4();
+  private flipped = new THREE.Matrix4();
+  private disposed = false;
   private rotX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
   private local = new THREE.Matrix4();
   private proj = new THREE.Matrix4();
@@ -111,47 +112,70 @@ class TrainLayer implements CustomLayerInterface {
   private bufW = 0;
   private bufH = 0;
 
-  constructor() {
+  constructor(night: boolean) {
+    this.night = night;
     // 단위 크기로 두고 칸마다 길이·폭·높이를 따로 준다. 바닥이 y=0 에 오게 올린다.
     const body = new RoundedBoxGeometry(1, 1, 1, 2, BODY_RADIUS);
     body.translate(0, 0.5, 0);
-    const box = new THREE.BoxGeometry(1, 1, 1);
-    box.translate(0, 0.5, 0);
-
     // 조명을 받는 재질이라야 차체 윗면과 옆면의 밝기가 갈려 입체로 보인다.
-    // MeshBasicMaterial 은 음영이 없어 위에서 보면 납작한 색 조각처럼 읽힌다.
-    const lit = (color: number) => {
-      const mat = new THREE.MeshLambertMaterial({ color });
-      mat.toneMapped = false;
-      return mat;
-    };
-    const instanced = (geo: THREE.BufferGeometry, mat: THREE.Material, count: number) => {
-      const mesh = new THREE.InstancedMesh(geo, mat, count);
-      mesh.frustumCulled = false;
-      mesh.count = 0;
-      this.scene.add(mesh);
-      return mesh;
-    };
-    this.boxes = instanced(body, lit(0xffffff), MAX_INSTANCES);
-    this.roofs = instanced(box, lit(0xffffff), MAX_INSTANCES);
-    this.windows = instanced(box, lit(WINDOW_COLOR), MAX_INSTANCES);
-    // 편성마다 앞뒤 두 개.
-    this.cabs = instanced(box, lit(CAB_COLOR), MAX_INSTANCES);
-    const glow = (color: number) => {
-      const mat = new THREE.MeshBasicMaterial({ color });
-      mat.toneMapped = false;
-      return mat;
-    };
-    this.headlights = instanced(box, glow(HEADLIGHT_COLOR), MAX_INSTANCES);
-    this.taillights = instanced(box, glow(TAILLIGHT_COLOR), MAX_INSTANCES);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    mat.toneMapped = false;
+    this.boxes = instanced(body, mat, MAX_INSTANCES);
+    this.scene.add(this.boxes);
 
     // 위에서 살짝 비스듬히 비춰 윗면이 가장 밝고 옆면이 어둡게 한다.
-    // 주변광을 높게 두어 노선 색이 어두워지지 않게 하고, 방향광은 면을
+    // 하늘빛을 높게 두어 노선 색이 어두워지지 않게 하고, 방향광은 면을
     // 구분할 만큼만 준다.
-    const sun = new THREE.DirectionalLight(0xffffff, 0.55);
+    const sun = new THREE.DirectionalLight(0xffffff, 0.7);
     sun.position.set(-0.45, 1, -0.35);
     this.scene.add(sun);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.92));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xb9bec8, 0.9));
+
+    modelReady()
+      .then((model) => this.useModel(model))
+      .catch((error) => {
+        // 모델이 없어도 둥근 상자로 계속 그린다.
+        console.error("train model failed", error);
+      });
+  }
+
+  private useModel(model: TrainModel): void {
+    if (this.disposed) return;
+    this.mid = new CarKit(model.mid, MAX_INSTANCES);
+    this.cab = new CarKit(model.cab, MAX_CABS);
+    this.mid.addTo(this.scene);
+    this.cab.addTo(this.scene);
+
+    const glow = (color: number) => {
+      const m = new THREE.MeshBasicMaterial({ color });
+      m.toneMapped = false;
+      return m;
+    };
+    this.headlights = instanced(model.lamp, glow(HEADLIGHT_COLOR), MAX_CABS);
+    this.taillights = instanced(model.lamp, glow(TAILLIGHT_COLOR), MAX_CABS);
+
+    const plane = new THREE.PlaneGeometry(1, 1);
+    plane.rotateX(-Math.PI / 2);
+    const beam = new THREE.MeshBasicMaterial({
+      color: HEADLIGHT_COLOR,
+      map: beamTexture(),
+      transparent: true,
+      opacity: BEAM_OPACITY,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    beam.toneMapped = false;
+    this.beams = instanced(plane, beam, MAX_CABS);
+    this.scene.add(this.headlights, this.taillights, this.beams);
+
+    this.setNight(this.night);
+    this.map?.triggerRepaint();
+  }
+
+  setNight(night: boolean): void {
+    this.night = night;
+    this.mid?.setNight(night);
+    this.cab?.setNight(night);
   }
 
   setTrains(trains: Train[]): void {
@@ -174,13 +198,21 @@ class TrainLayer implements CustomLayerInterface {
   }
 
   onRemove(): void {
+    this.disposed = true;
     this.scene.clear();
+    this.boxes.geometry.dispose();
+    (this.boxes.material as THREE.Material).dispose();
     this.boxes.dispose();
-    this.windows.dispose();
-    this.roofs.dispose();
-    this.cabs.dispose();
-    this.headlights.dispose();
-    this.taillights.dispose();
+    this.mid?.dispose();
+    this.cab?.dispose();
+    for (const mesh of [this.headlights, this.taillights, this.beams]) {
+      if (!mesh) continue;
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      material.map?.dispose();
+      material.dispose();
+      mesh.geometry.dispose();
+      mesh.dispose();
+    }
     this.renderer?.dispose();
     this.renderer = null;
     this.map = null;
@@ -192,8 +224,8 @@ class TrainLayer implements CustomLayerInterface {
     if (!map || !renderer) return;
 
     this.syncViewport(renderer, map.getCanvas());
-    this.sync(map.getZoom());
-    if (this.boxes.count === 0) return;
+    this.sync(map);
+    if (this.trains.length === 0) return;
 
     const t = this.originMerc;
     const meter = t.meterInMercatorCoordinateUnits();
@@ -225,18 +257,25 @@ class TrainLayer implements CustomLayerInterface {
     renderer.setViewport(0, 0, this.bufW, this.bufH);
   }
 
-  private sync(zoom: number): void {
+  private sync(map: MapLibreMap): void {
+    const zoom = map.getZoom();
     const origin = this.originMerc;
     const meter = origin.meterInMercatorCoordinateUnits();
     const perPixel = metersPerPixel(zoom);
-    // 가까이서는 칸을 나눠 그리고, 멀어지면 한 덩어리로 둔다.
-    const detailed = zoom >= CONSIST_ZOOM;
-    let n = 0;
-    let nCab = 0;
-    let nLamp = 0;
+    const { mid, cab, headlights, taillights, beams } = this;
+    // 가까이서는 칸을 나눠 모델로 그리고, 멀어지면 한 덩어리로 둔다.
+    const detailed =
+      zoom >= CONSIST_ZOOM && !!mid && !!cab && !!headlights && !!taillights && !!beams;
+    const bounds = detailed ? map.getBounds() : null;
+    let nBox = 0;
+    let nHead = 0;
+    let nTail = 0;
+    mid?.begin();
+    cab?.begin();
 
     for (const train of this.trains) {
-      if (n >= MAX_INSTANCES) break;
+      if (nBox >= MAX_INSTANCES) break;
+      if (bounds && !inView(bounds, train.coord)) continue;
 
       const cars = Math.max(1, Math.min(MAX_CARS, Math.round(train.cars) || 1));
       // 실제 편성 길이를 쓰되, 멀리서도 점처럼 사라지지 않게 하한을 둔다.
@@ -259,9 +298,10 @@ class TrainLayer implements CustomLayerInterface {
             ? UNKNOWN_CONGESTION_COLOR
             : congestionColor(train.congestion),
       );
+      this.roofTint.copy(this.color).lerp(this.white, ROOF_TINT);
       const route = this.routes.get(train.routeId);
 
-      for (let c = 0; c < segments && n < MAX_INSTANCES; c++) {
+      for (let c = 0; c < segments; c++) {
         // 편성 한가운데가 train.along 에 오도록 앞뒤로 벌린다.
         const offset = ((segments - 1) / 2 - c) * segLength;
 
@@ -284,50 +324,65 @@ class TrainLayer implements CustomLayerInterface {
         this.dummy.scale.set(segLength * CAR_FILL, height, width);
         this.dummy.updateMatrix();
         const car = this.dummy.matrix;
-        this.boxes.setMatrixAt(n, car);
-        this.boxes.setColorAt(n, this.color);
 
-        if (detailed) {
-          // 부품은 칸의 단위 공간에서 자리를 잡고 칸 변환을 그대로 따른다.
-          this.windows.setMatrixAt(n, this.part.multiplyMatrices(car, WINDOW_LOCAL));
-          this.roofs.setMatrixAt(n, this.part.multiplyMatrices(car, ROOF_LOCAL));
-          this.roofTint.copy(this.color).lerp(this.white, ROOF_TINT);
-          this.roofs.setColorAt(n, this.roofTint);
-          // 맨 앞 칸은 앞쪽(+x), 맨 뒤 칸은 뒤쪽(-x)에 운전실이 있다.
-          // 맨 앞 칸이 진행 방향이라 전조등, 맨 뒤 칸은 미등을 켠다.
-          if (c === 0) {
-            this.cabs.setMatrixAt(nCab++, this.part.multiplyMatrices(car, CAB_FRONT));
-            this.headlights.setMatrixAt(nLamp, this.part.multiplyMatrices(car, LAMP_FRONT));
-          }
-          if (c === segments - 1) {
-            this.cabs.setMatrixAt(nCab++, this.part.multiplyMatrices(car, CAB_BACK));
-            this.taillights.setMatrixAt(nLamp, this.part.multiplyMatrices(car, LAMP_BACK));
-            nLamp++;
-          }
+        if (!detailed) {
+          this.boxes.setMatrixAt(nBox, car);
+          this.boxes.setColorAt(nBox, this.color);
+          nBox++;
+          continue;
         }
-        n++;
+
+        // 맨 앞 칸은 진행 방향을 보는 운전실차, 맨 뒤 칸은 돌려 놓은 운전실차.
+        // 앞에는 전조등, 뒤에는 미등을 켠다.
+        const first = c === 0;
+        const last = c === segments - 1;
+        if (last && nTail < MAX_CABS) {
+          this.flipped.multiplyMatrices(car, FLIP);
+          taillights.setMatrixAt(nTail++, this.flipped);
+        }
+        if (first) {
+          cab.place(car, this.color, this.roofTint);
+          if (nHead < MAX_CABS) {
+            headlights.setMatrixAt(nHead, car);
+            beams.setMatrixAt(nHead, this.part.multiplyMatrices(car, BEAM_LOCAL));
+            nHead++;
+          }
+        } else if (last) {
+          cab.place(this.flipped, this.color, this.roofTint);
+        } else {
+          mid.place(car, this.color, this.roofTint);
+        }
       }
     }
 
-    this.boxes.count = n;
-    this.windows.count = detailed ? n : 0;
-    this.roofs.count = detailed ? n : 0;
-    this.cabs.count = nCab;
-    this.headlights.count = nLamp;
-    this.taillights.count = nLamp;
-    for (const mesh of [
-      this.boxes,
-      this.windows,
-      this.roofs,
-      this.cabs,
-      this.headlights,
-      this.taillights,
-    ]) {
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.boxes.count = nBox;
+    this.boxes.instanceMatrix.needsUpdate = true;
+    if (this.boxes.instanceColor) this.boxes.instanceColor.needsUpdate = true;
+    mid?.commit();
+    cab?.commit();
+    if (headlights && taillights && beams) {
+      headlights.count = detailed ? nHead : 0;
+      taillights.count = detailed ? nTail : 0;
+      beams.count = detailed && this.night ? nHead : 0;
+      for (const mesh of [headlights, taillights, beams]) mesh.instanceMatrix.needsUpdate = true;
     }
   }
+}
 
+function inView(bounds: maplibregl.LngLatBounds, coord: [number, number]): boolean {
+  return (
+    coord[0] >= bounds.getWest() - CULL_MARGIN_DEG &&
+    coord[0] <= bounds.getEast() + CULL_MARGIN_DEG &&
+    coord[1] >= bounds.getSouth() - CULL_MARGIN_DEG &&
+    coord[1] <= bounds.getNorth() + CULL_MARGIN_DEG
+  );
+}
+
+/** 모델은 한 번만 내려받는다. 지도 스타일이 바뀌면 레이어만 새로 만든다. */
+let modelPromise: Promise<TrainModel> | null = null;
+function modelReady(): Promise<TrainModel> {
+  modelPromise ??= loadTrainModel();
+  return modelPromise;
 }
 
 let layer: TrainLayer | null = null;
@@ -397,6 +452,7 @@ export function addTrainLayers(
   map: MapLibreMap,
   trains: Train[],
   routes: PreparedRoute[],
+  night: boolean,
 ): void {
   for (const id of [LAYER_ID, TRAIN_HIT_LAYER, "metro-train-dot", "metro-train-glow", "metro-train-body"]) {
     if (map.getLayer(id)) map.removeLayer(id);
@@ -405,7 +461,7 @@ export function addTrainLayers(
 
   document.querySelector("#train-overlay")?.remove();
 
-  layer = new TrainLayer();
+  layer = new TrainLayer(night);
   layer.setRoutes(routes);
   layer.setTrains(trains);
   map.addLayer(layer);

@@ -11,7 +11,8 @@
     "timetable": "node scripts/build-timetable.mjs",
     "runtimes": "node scripts/build-runtimes.mjs",
     "ridership": "node scripts/build-ridership.mjs",
-    "congestion": "node scripts/build-congestion.mjs"
+    "congestion": "node scripts/build-congestion.mjs",
+    "model": "blender --background --python scripts/build-train-model.py"
   },
   "dependencies": {
     "maplibre-gl": "^5.7.3",

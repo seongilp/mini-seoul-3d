@@ -269,7 +269,7 @@ function paintOverlay() {
     return;
   }
   try {
-    addTrainLayers(map, trains, routes);
+    addTrainLayers(map, trains, routes, state.night);
     setTrainColorMode(map, state.crowd);
     setUnderground(map, state.underground, state.night);
   } catch (error) {
